@@ -76,9 +76,10 @@ Durable Object, поэтому переживает перезапуск и пе
 | `cloudflare/src/index.js` | маршруты воркера: `/api/register`, `/api/login`, `/api/media`, `/api/purge-orphans`, `/ws`, `/health`, `/avatar/*`, `/sticker/*`, `/media/*`, `/updates/*.exe`, статика |
 | `cloudflare/src/hub.js` | Durable Object `ChatHub`: аккаунты, каналы, ЛС, друзья, голос, история, реакции, поиск, Web Push |
 | `cloudflare/src/matrix.js` | мост в Matrix: отправка сообщений и `/sync` |
-| `cloudflare/public/` | клиент `index.html`, PWA (`sw.js` с обработчиками `push`/`notificationclick`, `manifest.webmanifest`, иконки), `updates/` с частями exe и `latest.yml` |
+| `cloudflare/public/` | клиент `index.html`, PWA (`sw.js` с обработчиками `push`/`notificationclick`, `manifest.webmanifest`, иконки), `updates/` с частями exe и `latest.yml`, `download/Arc.apk` |
 | `cloudflare/desktop/` | Electron-обёртка: `main.js`, `preload.js`, сборка NSIS |
-| `src/main.rs`, `web/index.html` | локальный вариант на Rust + axum и его клиент |
+| `cloudflare/mobile/` | Android-приложение на Capacitor: интерфейс вшит внутрь APK |
+| `cloudflare/test-*.mjs` | тесты: протокол, клиент, сквозной сценарий, права владельца, CORS, мобильная сборка |
 
 Обмен по WebSocket (`/ws`) — JSON, тип события задаёт поле `t`. Например,
 `{"t":"join","room":"obshiy"}` и `{"t":"msg","room":"obshiy","text":"привет"}`:
@@ -140,20 +141,18 @@ npm run build
 Автообновление берёт `latest.yml` из `/updates/`: установщик порезан на части, а воркер склеивает
 их в один поток при скачивании. Порядок выпуска новой версии описан в `cloudflare/ДЕПЛОЙ.md`.
 
-## Локальный вариант на Rust
+## Android-приложение
 
-Вторичный, экспериментальный вариант: тот же мессенджер на Rust + axum со своим клиентом
-`web/index.html` (страница вшита в бинарник через `include_str!`); аккаунты, друзья и история —
-в `data/state.json`. Сборка и запуск:
+Готовый APK: **https://rust-messenger.sg530507.workers.dev/download/Arc.apk** (кнопка «Скачать APK» есть и в настройках приложения, раздел «Аккаунт»).
 
-- `cargo build --release`, затем `target\release\rust-messenger.exe`; порт — из `PORT`
-  (по умолчанию 8080).
+Сборка из папки `cloudflare/mobile/`: интерфейс берётся из `cloudflare/public/index.html` и вшивается в APK скриптом, адрес сервера подставляется отдельно.
 
-Нужен для локальных экспериментов без Cloudflare. Вариант остаётся под старым именем —
-каталог проекта `rust-messenger`, бинарник `rust-messenger.exe` — и это ожидаемо:
-переименование в Arc коснулось только основного приложения (сервер, PWA и десктоп-оболочка).
-Нигде не задеплоен и отстаёт от основного приложения: нет моста в Matrix,
-аватаров-картинок и стикеров, авторизация упрощена (SHA-256 с солью).
+```bat
+npx cap copy android
+cd android && gradlew.bat assembleRelease
+```
+
+Нужны JDK 21 и Android SDK (build-tools 36). Параметры ключа подписи лежат в `android/keystore.properties` — этот файл и сам `.keystore` в репозиторий не попадают.
 
 ## Безопасность
 
