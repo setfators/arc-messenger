@@ -16,6 +16,10 @@ cloudflare/mobile/www/
 cloudflare/android/app/build/
 cloudflare/android/app-release-*
 cloudflare/mobile/android/app/build/
+# Генерируется командой npx cap sync — в репозитории не нужно
+cloudflare/mobile/android/app/src/main/assets/
+cloudflare/mobile/android/capacitor-cordova-android-plugins/
+*.idsig
 
 # Части установщика обновлений — это десятки мегабайт бинарников
 cloudflare/public/updates/parts/
