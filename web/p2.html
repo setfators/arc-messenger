@@ -1,0 +1,438 @@
+const $ = (id) => document.getElementById(id);
+const store = {
+  token: localStorage.getItem('token') || '',
+  me: null,
+  channels: [],
+  room: 'obshiy',
+  roomKind: 'channel',
+  roomTitle: '# obshiy',
+  messages: {},
+  friends: { friends: [], incoming: [], outgoing: [] },
+  online: [],
+  dms: [],
+  ws: null,
+  voiceRoom: null,
+  voiceUsers: [],
+  muted: false,
+  localStream: null,
+  peers: new Map(),
+  reconnect: null,
+};
+let authMode = 'login';
+
+/* ------------------------------------------------------------------ утилиты */
+function toast(text) {
+  const box = $('toast');
+  box.textContent = text;
+  box.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => box.classList.remove('show'), 2600);
+}
+function colorOf(name) {
+  let h = 0;
+  for (const ch of name || '?') h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `hsl(${h} 55% 48%)`;
+}
+function initials(name) {
+  const parts = (name || '?').trim().split(/\s+/);
+  return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+}
+function timeOf(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+function send(obj) {
+  if (store.ws && store.ws.readyState === 1) store.ws.send(JSON.stringify(obj));
+  else toast('Нет соединения с сервером');
+}
+function avatar(name) {
+  const el = document.createElement('div');
+  el.className = 'ava';
+  el.style.background = colorOf(name);
+  el.textContent = initials(name);
+  return el;
+}
+
+/* ------------------------------------------------------------------ вход */
+function setAuthMode(mode) {
+  authMode = mode;
+  $('tabLogin').classList.toggle('active', mode === 'login');
+  $('tabReg').classList.toggle('active', mode === 'register');
+  $('authGo').textContent = mode === 'login' ? 'Войти' : 'Создать аккаунт';
+  $('authPass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('authErr').textContent = '';
+}
+$('tabLogin').onclick = () => setAuthMode('login');
+$('tabReg').onclick = () => setAuthMode('register');
+$('authPass').onkeydown = (e) => { if (e.key === 'Enter') goAuth(); };
+$('authName').onkeydown = (e) => { if (e.key === 'Enter') $('authPass').focus(); };
+
+async function goAuth() {
+  const name = $('authName').value.trim();
+  const password = $('authPass').value;
+  if (!name || !password) { $('authErr').textContent = 'Введите имя и пароль'; return; }
+  $('authGo').disabled = true;
+  try {
+    const res = await fetch('/api/' + (authMode === 'login' ? 'login' : 'register'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) { $('authErr').textContent = data.error || 'Не получилось'; return; }
+    store.token = data.token;
+    localStorage.setItem('token', data.token);
+    start();
+  } catch (e) {
+    $('authErr').textContent = 'Сервер не отвечает: ' + e.message;
+  } finally {
+    $('authGo').disabled = false;
+  }
+}
+$('authGo').onclick = goAuth;
+$('navOut').onclick = () => {
+  if (!confirm('Выйти из аккаунта?')) return;
+  localStorage.removeItem('token');
+  location.reload();
+};
+
+/* ------------------------------------------------------------------ соединение */
+function start() {
+  $('auth').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  connect();
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(store.token)}`);
+  store.ws = ws;
+  $('connState').textContent = 'подключение…';
+  $('connState').style.color = 'var(--muted)';
+
+  ws.onopen = () => {
+    $('connState').textContent = 'на связи';
+    $('connState').style.color = 'var(--ok)';
+  };
+  ws.onmessage = (event) => {
+    let data;
+    try { data = JSON.parse(event.data); } catch { return; }
+    handle(data);
+  };
+  ws.onclose = () => {
+    if (!store.me) {
+      localStorage.removeItem('token');
+      store.token = '';
+      $('app').classList.add('hidden');
+      $('auth').classList.remove('hidden');
+      $('authErr').textContent = 'Сессия истекла — войдите снова';
+      return;
+    }
+    $('connState').textContent = 'переподключение…';
+    $('connState').style.color = 'var(--danger)';
+    clearTimeout(store.reconnect);
+    store.reconnect = setTimeout(connect, 1500);
+  };
+}
+
+function handle(data) {
+  switch (data.t) {
+    case 'hello': {
+      store.me = data.me;
+      store.channels = data.channels || [];
+      $('meAva').style.background = colorOf(data.me.name);
+      $('meAva').textContent = initials(data.me.name);
+      $('meAva').title = data.me.name;
+      renderChannels();
+      send({ t: 'join', room: store.room });
+      if (store.voiceRoom) send({ t: 'voice_join', room: store.voiceRoom });
+      break;
+    }
+    case 'channels': {
+      store.channels = data.channels || [];
+      renderChannels();
+      break;
+    }
+    case 'history': {
+      if (!store.room && store.roomKind === 'dm') store.room = data.room;
+      store.messages[data.room] = data.messages || [];
+      if (data.room === store.room) renderMessages();
+      break;
+    }
+    case 'msg': {
+      const list = store.messages[data.room] || (store.messages[data.room] = []);
+      list.push(data);
+      if (data.room === store.room) {
+        renderMessages();
+        scrollDown();
+      }
+      break;
+    }
+    case 'presence': {
+      store.online = data.online || [];
+      renderFriends();
+      break;
+    }
+    case 'friends': {
+      store.friends = data;
+      renderFriends();
+      break;
+    }
+    case 'dm_list': {
+      store.dms = data.items || [];
+      renderChannels();
+      break;
+    }
+    case 'voice_state': {
+      handleVoiceState(data);
+      break;
+    }
+    case 'rtc': {
+      handleRtc(data);
+      break;
+    }
+    case 'error': {
+      toast(data.text || 'Ошибка');
+      break;
+    }
+    case 'notice': {
+      toast(data.text || '');
+      break;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ каналы и друзья */
+function renderChannels() {
+  const box = $('channels');
+  box.innerHTML = '';
+  for (const channel of store.channels) {
+    const btn = document.createElement('button');
+    btn.className = 'chan' + (store.roomKind === 'channel' && store.room === channel ? ' active' : '');
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = '# ' + channel;
+    btn.appendChild(nm);
+
+    const inThis = store.voiceRoom === channel;
+    const mic = document.createElement('span');
+    mic.className = 'mic';
+    mic.textContent = inThis ? '🔊' : '🎧';
+    mic.title = inThis ? 'Вы в голосовом канале' : 'Войти в голосовой канал';
+    mic.onclick = (e) => {
+      e.stopPropagation();
+      inThis ? leaveVoice() : joinVoice(channel);
+    };
+    btn.appendChild(mic);
+    btn.onclick = () => openRoom(channel, 'channel', '# ' + channel);
+    box.appendChild(btn);
+  }
+
+  const dms = $('dmList');
+  dms.innerHTML = '';
+  for (const item of store.dms) {
+    const btn = document.createElement('button');
+    btn.className = 'chan' + (store.roomKind === 'dm' && store.room === item.room ? ' active' : '');
+    const dot = document.createElement('span');
+    dot.className = 'vdot';
+    dot.style.background = (store.online || []).some((n) => n.toLowerCase() === item.name.toLowerCase())
+      ? 'var(--ok)' : 'var(--muted)';
+    btn.appendChild(dot);
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = item.name;
+    btn.appendChild(nm);
+    btn.onclick = () => openRoom(item.room, 'dm', '@ ' + item.name);
+    dms.appendChild(btn);
+  }
+  if (!store.dms.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'Пока пусто — добавьте друга по имени';
+    dms.appendChild(empty);
+  }
+  renderVoiceBox();
+}
+
+function openRoom(room, kind, title) {
+  store.room = room;
+  store.roomKind = kind;
+  store.roomTitle = title;
+  $('topTitle').textContent = title;
+  $('friendsPane').classList.add('hidden');
+  $('messages').classList.remove('hidden');
+  $('composer').classList.remove('hidden');
+  $('navFriends').classList.remove('active');
+  $('navChannels').classList.add('active');
+  $('side').classList.remove('open');
+  renderChannels();
+  renderMessages();
+  if (kind === 'dm') {
+    const other = title.replace(/^@ /, '');
+    send({ t: 'dm_open', name: other });
+  } else {
+    send({ t: 'join', room });
+  }
+}
+
+function renderMessages() {
+  const box = $('messages');
+  const list = store.messages[store.room] || [];
+  box.innerHTML = '';
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">Сообщений пока нет — напишите первым.</div>';
+    return;
+  }
+  for (const m of list) {
+    const row = document.createElement('div');
+    row.className = 'msg';
+    row.appendChild(avatar(m.author));
+    const col = document.createElement('div');
+    const head = document.createElement('div');
+    head.className = 'head';
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = m.author;
+    who.style.color = colorOf(m.author);
+    const when = document.createElement('span');
+    when.className = 'when';
+    when.textContent = timeOf(m.ts);
+    head.append(who, when);
+    const body = document.createElement('div');
+    body.className = 'body';
+    body.textContent = m.text;
+    col.append(head, body);
+    row.appendChild(col);
+    box.appendChild(row);
+  }
+  scrollDown();
+}
+function scrollDown() {
+  const box = $('messages');
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderFriends() {
+  const online = (name) => (store.online || []).some((n) => n.toLowerCase() === String(name).toLowerCase());
+  const list = $('friendList');
+  const req = $('requests');
+  list.innerHTML = '';
+  req.innerHTML = '';
+
+  const incoming = store.friends.incoming || [];
+  const outgoing = store.friends.outgoing || [];
+  const friends = store.friends.friends || [];
+
+  if (incoming.length) {
+    const label = document.createElement('div');
+    label.className = 'side-label';
+    label.textContent = 'Заявки в друзья';
+    req.appendChild(label);
+  }
+  for (const key of incoming) {
+    const name = store.friends.names && store.friends.names[key] ? store.friends.names[key] : key;
+    const row = document.createElement('div');
+    row.className = 'frow';
+    row.appendChild(avatar(name));
+    const nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.textContent = name;
+    row.appendChild(nm);
+    const ok = document.createElement('button');
+    ok.textContent = 'Принять';
+    ok.onclick = () => send({ t: 'friend_accept', name });
+    const no = document.createElement('button');
+    no.textContent = 'Отклонить';
+    no.onclick = () => send({ t: 'friend_remove', name });
+    row.append(ok, no);
+    req.appendChild(row);
+  }
+
+  const label = document.createElement('div');
+  label.className = 'side-label';
+  label.textContent = 'Друзья — ' + friends.length;
+  list.appendChild(label);
+
+  for (const key of friends) {
+    const name = store.friends.names && store.friends.names[key] ? store.friends.names[key] : key;
+    const row = document.createElement('div');
+    row.className = 'frow';
+    row.appendChild(avatar(name));
+    const col = document.createElement('div');
+    col.className = 'nm';
+    const nm = document.createElement('div');
+    nm.textContent = name;
+    const st = document.createElement('div');
+    st.className = 'st' + (online(name) ? ' on' : '');
+    st.textContent = online(name) ? 'в сети' : 'не в сети';
+    col.append(nm, st);
+    row.appendChild(col);
+    const write = document.createElement('button');
+    write.textContent = 'Написать';
+    write.onclick = () => openRoom(null, 'dm', '@ ' + name);
+    const del = document.createElement('button');
+    del.textContent = '✕';
+    del.title = 'Убрать из друзей';
+    del.onclick = () => send({ t: 'friend_remove', name });
+    row.append(write, del);
+    list.appendChild(row);
+  }
+  if (!friends.length && !incoming.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'Друзей пока нет. Введите имя друга выше — он получит заявку.';
+    list.appendChild(empty);
+  }
+  if (outgoing.length && store.friends.names) {
+    const wait = document.createElement('div');
+    wait.className = 'empty';
+    wait.textContent = 'Ждём ответа: ' + outgoing.map((k) => store.friends.names[k] || k).join(', ');
+    list.appendChild(wait);
+  }
+}
+
+$('friendAdd').onclick = () => {
+  const name = $('friendName').value.trim();
+  if (!name) return;
+  send({ t: 'friend_add', name });
+  $('friendName').value = '';
+};
+$('friendName').onkeydown = (e) => { if (e.key === 'Enter') $('friendAdd').click(); };
+
+$('navFriends').onclick = () => {
+  $('friendsPane').classList.remove('hidden');
+  $('messages').classList.add('hidden');
+  $('composer').classList.add('hidden');
+  $('topTitle').textContent = 'Друзья';
+  $('navFriends').classList.add('active');
+  $('navChannels').classList.remove('active');
+  $('side').classList.remove('open');
+  renderFriends();
+};
+$('navChannels').onclick = () => {
+  openRoom(store.room || 'obshiy', store.roomKind, store.roomTitle);
+  $('side').classList.add('open');
+  setTimeout(() => $('side').classList.remove('open'), 1800);
+};
+$('navInvite').onclick = async () => {
+  const link = location.origin;
+  try {
+    await navigator.clipboard.writeText(link);
+    toast('Ссылка скопирована: ' + link);
+  } catch {
+    prompt('Скопируйте ссылку и отправьте другу:', link);
+  }
+};
+$('newChannel').onclick = () => {
+  const name = prompt('Название канала латиницей (например: obshiy, games, work)');
+  if (!name) return;
+  send({ t: 'create', room: name });
+};
+$('composer').onsubmit = (e) => {
+  e.preventDefault();
+  const input = $('text');
+  const text = input.value.trim();
+  if (!text || !store.room) return;
+  send({ t: 'msg', room: store.room, text });
+  input.value = '';
+};

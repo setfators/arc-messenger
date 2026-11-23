@@ -1,0 +1,43 @@
+# Что не попадает в репозиторий.
+
+# Зависимости
+node_modules/
+
+# Сборки
+dist/
+build/
+target/
+*.apk
+*.aab
+*.exe
+*.exe.blockmap
+*.msi
+cloudflare/mobile/www/
+cloudflare/android/app/build/
+cloudflare/android/app-release-*
+cloudflare/mobile/android/app/build/
+
+# Части установщика обновлений — это десятки мегабайт бинарников
+cloudflare/public/updates/parts/
+
+# Ключи подписи и пароли к ним
+*.keystore
+*.jks
+keystore.properties
+cloudflare/mobile/android/keystore.properties
+cloudflare/android/*.keystore
+
+# Реальные данные мессенджера (переписка, каналы, состояние)
+data/
+*.jsonl
+cloudflare/.wrangler/
+
+# Служебные файлы инструментов
+.wrangler/
+.gradle/
+local.properties
+wrangler.toml.bak
+*.log
+.env
+.DS_Store
+Thumbs.db

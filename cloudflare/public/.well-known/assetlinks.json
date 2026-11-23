@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "ru.arc.messenger",
+    "sha256_cert_fingerprints": [
+      "A3:8C:D8:B3:0F:1C:13:03:61:FA:EF:1E:87:CE:E3:D7:78:F5:70:E4:81:66:14:51:25:F6:62:50:22:22:28:CA"
+    ]
+  }
+}]

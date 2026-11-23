@@ -1,0 +1,80 @@
+{
+  "name": "messenger-desktop",
+  "productName": "Arc",
+  "version": "1.4.2",
+  "description": "Arc — десктопное приложение",
+  "main": "main.js",
+  "author": "setfators",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "latest"
+  },
+  "build": {
+    "appId": "ru.messenger.desktop",
+    "productName": "Arc",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "error.html",
+      "icon.ico",
+      "node_modules/electron-updater/**/*",
+      "node_modules/builder-util-runtime/**/*",
+      "node_modules/electron-builder-squirrel-windows/**/*",
+      "node_modules/fs-extra/**/*",
+      "node_modules/js-yaml/**/*",
+      "node_modules/lazy-val/**/*",
+      "node_modules/lodash.*/**/*",
+      "node_modules/semver/**/*",
+      "node_modules/lodash.escaperegexp/**/*",
+      "node_modules/ms/**/*",
+      "node_modules/sax/**/*",
+      "node_modules/debug/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://rust-messenger.sg530507.workers.dev/updates/"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico",
+      "artifactName": "Arc-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Arc",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerLanguages": [
+        "ru_RU"
+      ],
+      "language": "1049",
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  }
+}

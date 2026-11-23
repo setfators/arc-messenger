@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  
+  <defs>
+    <linearGradient id="g-b" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b2f3d"/>
+      <stop offset="1" stop-color="#1b1c20"/>
+    </linearGradient>
+    <radialGradient id="glow-b" cx="0.28" cy="0.18" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#g-b)"/>
+  <rect width="512" height="512" rx="116" fill="url(#glow-b)"/>
+  <defs>
+    <linearGradient id="b-bolt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c8bff"/>
+      <stop offset="1" stop-color="#5865f2"/>
+    </linearGradient>
+  </defs>
+  <g opacity="1">
+    <rect x="112" y="118" width="288" height="250" rx="62" fill="#ffffff"/>
+    <path d="M 167.8 360
+    L 133.7 394
+    Q 118.2 408 205 366 Z" fill="#ffffff"/>
+  </g>
+  <path d="M 282 144 L 186 282 L 250 282 L 230 372 L 336 220 L 268 220 Z" fill="url(#b-bolt)"/>
+</svg>

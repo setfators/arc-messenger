@@ -1,0 +1,4377 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Arc</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#5865f2">
+<meta name="description" content="Arc — каналы, личные сообщения и голосовой чат">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Arc">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<style>
+  :root {
+    --bg: #1b1c20; --panel: #23252b; --panel2: #2b2d34; --line: #35383f;
+    --text: #e8eaed; --muted: #9aa0ab; --accent: #5865f2; --ok: #3ba55d; --danger: #ed4245;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); font: 15px/1.45 "Segoe UI", Roboto, Arial, sans-serif;
+    overflow: hidden;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  input { font: inherit; }
+  .hidden { display: none !important; }
+
+  /* ---------- авторизация ---------- */
+  .auth {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(1200px 600px at 30% 0%, #2a2350 0%, #16171b 60%);
+    padding: 20px; z-index: 20;
+  }
+  .auth-card {
+    width: 100%; max-width: 380px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px; padding: 24px; box-shadow: 0 24px 60px rgba(0,0,0,.45);
+  }
+  .auth-card h1 { margin: 0 0 6px; font-size: 22px; }
+  .auth-card .hint { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab {
+    flex: 1; padding: 9px; border-radius: 10px; border: 1px solid var(--line);
+    background: transparent; color: var(--muted);
+  }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .auth-card input {
+    width: 100%; padding: 11px 13px; margin-bottom: 10px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--text); outline: none;
+  }
+  .auth-card input:focus { border-color: var(--accent); }
+  .primary {
+    background: var(--accent); border: none; color: #fff; border-radius: 10px;
+    padding: 11px 16px; font-weight: 600;
+  }
+  .primary:disabled { opacity: .6; cursor: default; }
+  .auth-card .primary { width: 100%; }
+  .err { color: #ff8a8d; font-size: 13px; min-height: 18px; margin-top: 8px; }
+  .link { background: none; border: none; color: var(--muted); font-size: 13px; padding: 6px 0 0; }
+
+  /* ---------- каркас ---------- */
+  .app { display: grid; grid-template-columns: 74px 250px 1fr; height: 100%; }
+  .rail {
+    background: #141519; display: flex; flex-direction: column; align-items: center;
+    gap: 10px; padding: 12px 0; border-right: 1px solid var(--line);
+  }
+  .me {
+    width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
+    font-weight: 700; color: #fff; background: var(--accent); margin-bottom: 6px;
+  }
+  .rail-btn {
+    width: 46px; height: 46px; border-radius: 14px; border: none; background: var(--panel2);
+    font-size: 18px; display: grid; place-items: center;
+  }
+  .rail-btn.active { background: var(--accent); color: #fff; }
+  .rail-spacer { flex: 1; }
+  .side {
+    background: var(--panel); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .side-head {
+    padding: 16px 16px 10px; font-weight: 700; letter-spacing: .02em;
+    border-bottom: 1px solid var(--line);
+  }
+  .side-scroll { overflow-y: auto; padding: 10px 8px; flex: 1; }
+  .side-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+    padding: 10px 8px 6px;
+  }
+  .chan {
+    display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+    padding: 7px 9px; border-radius: 8px; border: none; background: transparent;
+    color: var(--muted); font-size: 14px;
+  }
+  .chan:hover { background: var(--panel2); color: var(--text); }
+  .chan.active { background: #383b45; color: #fff; }
+  .chan .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chan .mic { font-size: 13px; opacity: .9; }
+  /* Непрочитанные: маленький счётчик справа от названия канала/чата. */
+  .chan .badge {
+    min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+    background: var(--danger); color: #fff; font-size: 11px; font-weight: 700;
+    display: grid; place-items: center; flex: 0 0 auto;
+  }
+  /* Кнопки у сообщения появляются при наведении (реакция, ответ, удаление). */
+  .msg { position: relative; }
+  .side-add {
+    margin: 6px 8px 10px; padding: 8px; border-radius: 8px; border: 1px dashed var(--line);
+    background: transparent; color: var(--muted); font-size: 13px;
+  }
+  .voice-box {
+    border-top: 1px solid var(--line); padding: 10px 12px 12px; background: #1d1f24;
+  }
+  .voice-head { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ok); margin-bottom: 6px; }
+  .vuser { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); padding: 3px 0; }
+  .vdot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .voice-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .pill {
+    border: 1px solid var(--line); background: var(--panel2); border-radius: 999px;
+    padding: 7px 11px; font-size: 12px; color: var(--text);
+  }
+  .pill.on { border-color: var(--danger); color: #ff9a9c; }
+  .pill.danger { border-color: var(--danger); color: #ff9a9c; }
+
+  .main { display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 18px;
+    border-bottom: 1px solid var(--line); background: var(--bg);
+  }
+  .topbar .tt { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar .pill { margin-left: auto; }
+  .messages { flex: 1; overflow-y: auto; padding: 18px 18px 8px; }
+  .msg { display: flex; gap: 10px; padding: 5px 0; }
+  .ava {
+    width: 36px; height: 36px; border-radius: 50%; flex: 0 0 36px; display: grid;
+    place-items: center; font-weight: 700; font-size: 14px; color: #fff;
+  }
+  .msg .head { display: flex; align-items: baseline; gap: 8px; }
+  .msg .who { font-weight: 600; }
+  .msg .when { font-size: 11px; color: var(--muted); }
+  .msg .body { white-space: pre-wrap; word-break: break-word; }
+  .empty { color: var(--muted); font-size: 14px; padding: 8px 2px; }
+
+  .friends { flex: 1; overflow-y: auto; padding: 18px; }
+  .friends-head { display: flex; gap: 8px; margin-bottom: 14px; }
+  .friends-head input {
+    flex: 1; padding: 11px 13px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); outline: none;
+  }
+  .frow {
+    display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px;
+    background: var(--panel);
+  }
+  .frow + .frow { margin-top: 6px; }
+  .frow .nm { flex: 1; }
+  .frow .st { font-size: 12px; color: var(--muted); }
+  .frow .st.on { color: var(--ok); }
+  .frow button { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; padding: 6px 10px; font-size: 12px; }
+
+  .composer {
+    display: flex; gap: 10px; padding: 12px 18px 16px; border-top: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .composer input {
+    flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); outline: none;
+  }
+  .composer input:focus { border-color: var(--accent); }
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: #000; border: 1px solid var(--line); color: #fff; padding: 10px 16px;
+    border-radius: 10px; font-size: 13px; opacity: 0; pointer-events: none;
+    transition: opacity .2s; z-index: 40; max-width: 80vw;
+  }
+  .toast.show { opacity: .95; }
+
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 60px 1fr; }
+    .side { position: fixed; left: 60px; top: 0; bottom: 0; width: 240px; z-index: 10; transform: translateX(-120%); transition: transform .2s; }
+    .side.open { transform: none; }
+  }
+
+  /* ---------- темы и масштаб ---------- */
+  html[data-theme="light"] .auth { background: radial-gradient(1200px 600px at 30% 0%, #c9cdf5 0%, #eef0f4 60%); }
+  html[data-theme="midnight"] .auth { background: radial-gradient(1200px 600px at 30% 0%, #1a1440 0%, #07080f 60%); }
+  body.compact .msg { padding: 1px 0; }
+  body.compact .msg .ava { width: 28px; height: 28px; flex: 0 0 28px; font-size: 12px; }
+  body.compact .messages { padding: 10px 18px 4px; }
+  /* Настройка «Показывать время»: прячем подпись времени у сообщений. */
+  body.hide-time .msg .when { display: none; }
+  body.hide-time .msg .head { gap: 0; }
+
+  /* ---------- удаление чатов и диалоги ---------- */
+  .chan .del {
+    display: grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px;
+    border-radius: 5px; border: none; background: transparent; color: var(--muted);
+    font-size: 12px; line-height: 1; opacity: 0; transition: opacity .12s, background .12s;
+  }
+  .chan:hover .del { opacity: 1; }
+  .chan.active .del { opacity: .7; }
+  .chan .del:hover { opacity: 1; background: var(--danger); color: #fff; }
+  .side-add:hover { border-color: var(--accent); color: var(--text); }
+  .dlg {
+    width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 20px; box-shadow: 0 24px 60px rgba(0,0,0,.5);
+  }
+  .dlg h3 { margin: 0 0 8px; font-size: 17px; }
+  .dlg p { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+  .dlg input {
+    width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); outline: none;
+  }
+  .dlg input:focus { border-color: var(--accent); }
+  .dlg-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+  .dlg-row button { border-radius: 10px; padding: 9px 16px; border: 1px solid var(--line); background: transparent; color: var(--text); }
+  .dlg-row button:hover { border-color: var(--muted); }
+  .dlg-row .ok { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .dlg-row .ok.danger { background: var(--danger); border-color: var(--danger); }
+
+  /* ---------- модальное окно ---------- */
+  .modal-back {
+    position: fixed; inset: 0; background: rgba(0,0,0,.62); z-index: 60;
+    display: flex; align-items: center; justify-content: center; padding: 18px;
+  }
+  .settings {
+    width: min(940px, 100%); height: min(680px, 94vh); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+    display: grid; grid-template-columns: 228px 1fr; box-shadow: 0 30px 80px rgba(0,0,0,.55);
+  }
+  .settings-nav { background: var(--panel2); border-right: 1px solid var(--line); padding: 16px 10px; overflow-y: auto; }
+  .settings-nav h3 { margin: 0 8px 12px; font-size: 15px; letter-spacing: .02em; }
+  .settings-nav button {
+    display: block; width: 100%; text-align: left; padding: 9px 10px; border: none;
+    background: transparent; border-radius: 8px; color: var(--muted); font-size: 14px;
+  }
+  .settings-nav button:hover { background: rgba(128,128,128,.12); }
+  .settings-nav button.active { background: var(--panel); color: var(--text); font-weight: 600; }
+  .settings-body { overflow-y: auto; padding: 20px 24px 26px; }
+  .settings-body h2 { margin: 0 0 2px; font-size: 19px; }
+  .settings-body .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .settings-top { display: flex; align-items: flex-start; gap: 12px; }
+  .settings-top .grow { flex: 1; }
+  .x-btn {
+    border: 1px solid var(--line); background: var(--panel2); width: 34px; height: 34px;
+    border-radius: 50%; font-size: 16px; line-height: 1; color: var(--muted); flex: 0 0 34px;
+  }
+  .sect { padding: 0 0 16px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+  .sect:last-child { border-bottom: none; margin-bottom: 0; }
+  .sect h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .field { display: flex; align-items: center; gap: 14px; padding: 9px 0; flex-wrap: wrap; }
+  .field .lbl { flex: 1 1 220px; min-width: 180px; }
+  .field .lbl small { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; }
+  .field input[type=text], .field input[type=password], .field select, .field textarea {
+    padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel2);
+    color: var(--text); outline: none; font: inherit; font-size: 14px; min-width: 200px;
+  }
+  .field input[type=text]:focus, .field input[type=password]:focus, .field textarea:focus, .field select:focus { border-color: var(--accent); }
+  .field textarea { min-height: 66px; resize: vertical; width: 100%; }
+  .switch { width: 44px; height: 24px; border-radius: 999px; background: var(--line); border: none; position: relative; flex: 0 0 44px; padding: 0; transition: background .15s; }
+  .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch.on { background: var(--ok); }
+  .switch.on::after { transform: translateX(20px); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); background: var(--panel2); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+  .chip.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+  .swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
+  .swatch.active { border-color: var(--text); }
+  .avatar-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .avatar-preview { width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; font-size: 30px; font-weight: 700; color: #fff; flex: 0 0 74px; }
+  .avatar-set { display: flex; gap: 6px; flex-wrap: wrap; max-width: 300px; }
+  .avatar-set button { width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel2); font-size: 17px; line-height: 1; }
+  .avatar-set button.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .range { display: flex; align-items: center; gap: 10px; }
+  .range input[type=range] { width: 190px; accent-color: var(--accent); }
+  .range .val { font-size: 12px; color: var(--muted); min-width: 42px; }
+  .btn-line { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn-line button { border: 1px solid var(--line); background: var(--panel2); border-radius: 9px; padding: 9px 13px; font-size: 13px; }
+  .btn-line button.solid { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-line button.danger { border-color: var(--danger); color: #ff8c8e; }
+  .meter { width: 150px; height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0%; background: var(--ok); transition: width .08s; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .typing {
+    height: 0; overflow: hidden; color: var(--muted); font-size: 12px;
+    padding: 0 18px; transition: height .15s;
+  }
+  .typing.on { height: 20px; }
+  @media (max-width: 760px) {
+    .settings { grid-template-columns: 1fr; height: 94vh; }
+    .settings-nav { display: flex; gap: 6px; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 10px; }
+    .settings-nav h3 { display: none; }
+    .settings-nav button { white-space: nowrap; width: auto; }
+  }
+  /* ── темы и дополнительные элементы ── */
+  html[data-theme="light"] {
+    --bg: #ffffff; --panel: #f4f5f7; --panel2: #eceef2; --line: #dcdee4;
+    --text: #101216; --muted: #5b6472; --ok: #1a9c56; --danger: #d83c3e;
+  }
+  html[data-theme="midnight"] {
+    --bg: #06070b; --panel: #0f1117; --panel2: #171a23; --line: #242833;
+    --text: #e7e9ef; --muted: #8b93a5; --accent: #7c8bff;
+  }
+  .s-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 8px 12px; }
+  .s-head h3 { margin: 0; }
+  .s-close { width: 28px; height: 28px; border-radius: 6px; color: var(--muted); font-size: 15px; line-height: 1; flex: 0 0 28px; border: none; background: transparent; }
+  .s-close:hover { background: rgba(128,128,128,.15); color: var(--text); }
+  .range-val { min-width: 52px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .install-note { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  /* --- эмодзи, стикеры, звонок, аватары-картинки --- */
+  .composer .cbtn { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; }
+  .composer .cbtn:hover { border-color: var(--accent); }
+  .emoji-panel { border-top: 1px solid var(--line); background: var(--panel); padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .emoji-panel.hidden { display: none; }
+  .ep-tabs { display: flex; gap: 6px; align-items: center; }
+  .ep-tab { background: transparent; color: var(--muted); border: 1px solid transparent; border-radius: 8px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+  .ep-tab.active { color: var(--text); background: var(--panel2); border-color: var(--line); }
+  .ep-close { margin-left: auto; background: transparent; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; }
+  .ep-body { overflow-y: auto; max-height: 190px; }
+  .ep-body.hidden { display: none; }
+  .ep-emoji { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 2px; }
+  .ep-emoji button { font-size: 22px; line-height: 1; background: transparent; border: 0; border-radius: 8px; padding: 5px 0; cursor: pointer; }
+  .ep-emoji button:hover { background: var(--panel2); }
+  .ep-stickers { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+  .ep-sticker { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 4px; cursor: pointer; }
+  .ep-sticker:hover { border-color: var(--accent); }
+  .ep-sticker img { width: 100%; height: 72px; object-fit: contain; display: block; }
+  .ep-empty { color: var(--muted); font-size: 13px; padding: 8px 2px; }
+  .sticker-admin { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+  .sticker-cell { position: relative; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 6px; text-align: center; }
+  .sticker-cell img { width: 100%; height: 80px; object-fit: contain; display: block; }
+  .sticker-name { font-size: 11px; color: var(--muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sticker-del { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,.6); color: #fff; border: 0; border-radius: 50%; width: 20px; height: 20px; font-size: 11px; cursor: pointer; }
+  .msg .sticker-img { max-width: 160px; max-height: 160px; border-radius: 10px; display: block; margin-top: 2px; }
+  .ava img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+  .avatar-preview.has-img { background: var(--panel2); overflow: hidden; padding: 0; }
+  .avatar-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #meAva img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+  .voice-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .call { position: fixed; inset: 0; z-index: 60; background: rgba(8,10,16,.94); display: flex; flex-direction: column; padding: 16px; gap: 10px; }
+  .call.hidden { display: none; }
+  .call-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .call-title { font-weight: 600; font-size: 15px; }
+  .call-people { color: var(--muted); font-size: 13px; }
+  .call-head .cbtn { margin-left: auto; width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); cursor: pointer; }
+  .call-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; align-content: start; overflow-y: auto; max-height: 42vh; }
+  .vtile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .vtile .ava { width: 56px; height: 56px; font-size: 22px; }
+  .vname { font-size: 13px; font-weight: 600; text-align: center; }
+  .vstate { font-size: 11px; color: var(--muted); }
+  .vscreen { font-size: 11px; color: var(--accent); }
+  .screen-stage { position: relative; flex: 1; min-height: 160px; background: #000; border-radius: 12px; overflow: hidden; }
+  .screen-stage.hidden { display: none; }
+  .screen-stage video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .screen-cap { position: absolute; left: 10px; bottom: 10px; background: rgba(0,0,0,.65); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+  .call-grid.n6, .call-grid.n7, .call-grid.n8 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .src-dlg { width: min(880px, 94vw); }
+  .src-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; max-height: 56vh; overflow-y: auto; padding: 4px; margin: 8px 0 14px; }
+  .src-item { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; text-align: left; color: inherit; }
+  .src-item:hover, .src-item:focus-visible { border-color: var(--accent); }
+  .src-item .src-thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: #000; display: block; }
+  .src-item .src-name { font-size: 12px; line-height: 1.25; max-height: 2.6em; overflow: hidden; display: flex; gap: 6px; align-items: flex-start; }
+  .src-item .src-name img { width: 16px; height: 16px; border-radius: 3px; flex: 0 0 auto; }
+  .src-tabs { display: flex; gap: 8px; margin-bottom: 6px; }
+  .src-tabs button { background: var(--panel); border: 1px solid var(--line); color: inherit; border-radius: 8px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+  .src-tabs button.on { border-color: var(--accent); color: var(--accent); }
+  .src-empty { padding: 18px; text-align: center; opacity: .7; font-size: 13px; }
+  .upd-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .upd-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; width: 200px; }
+  .upd-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .upd-note { font-size: 12px; opacity: .75; }
+
+  /* ══════════════ 1.4.0: ответы, реакции, картинки, поиск, профиль ══════════════ */
+  .main { position: relative; }
+  .topbar .tb-btn {
+    width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); font-size: 15px; line-height: 1;
+    flex: 0 0 34px; padding: 0;
+  }
+  .topbar .tb-btn:hover { border-color: var(--accent); }
+
+  /* инструменты сообщения: «+» реакция, «Ответить», удаление */
+  .msg .msg-tools {
+    position: absolute; top: 2px; right: 6px; display: flex; gap: 4px; z-index: 3;
+    opacity: 0; transition: opacity .12s;
+  }
+  .msg:hover .msg-tools, .msg .msg-tools:focus-within { opacity: 1; }
+  .msg .msg-tools button {
+    border-radius: 6px; border: 1px solid var(--line); background: var(--panel2);
+    color: var(--muted); font-size: 11px; line-height: 1; padding: 4px 7px; min-height: 22px;
+    transition: border-color .12s, color .12s;
+  }
+  .msg .msg-tools .del-msg:hover { border-color: var(--danger); color: #ff9a9c; }
+  .msg .msg-tools .reply-btn:hover, .msg .msg-tools .rx-add:hover { border-color: var(--accent); color: var(--text); }
+  .msg.flash { background: rgba(88,101,242,.18); border-radius: 8px; transition: background .25s; }
+  .msg .who {
+    background: none; border: none; padding: 0; font: inherit; font-weight: 600;
+    text-align: left; cursor: pointer;
+  }
+  .msg .who:hover { text-decoration: underline; }
+
+  /* цитата над текстом сообщения */
+  .reply-quote {
+    display: flex; align-items: baseline; gap: 5px; max-width: min(520px, 100%);
+    font-size: 12px; color: var(--muted); border-left: 3px solid var(--accent);
+    padding: 1px 0 1px 8px; margin: 2px 0 3px; cursor: pointer;
+    overflow: hidden; white-space: nowrap;
+  }
+  .reply-quote:hover .rq-text { color: var(--text); }
+  .reply-quote .rq-author { color: var(--accent); font-weight: 600; flex: 0 0 auto; }
+  .reply-quote .rq-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .reply-quote.gone { border-left-color: var(--line); cursor: default; font-style: italic; }
+  .reply-quote.gone .rq-author { color: var(--muted); }
+
+  /* реакции */
+  .rx-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .rx {
+    border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+    border-radius: 999px; padding: 2px 9px; font-size: 12px; line-height: 1.45;
+  }
+  .rx:hover { border-color: var(--accent); }
+  .rx.mine { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: rgba(88,101,242,.16); }
+  .rx-pick {
+    position: absolute; top: 28px; right: 6px; z-index: 6; display: flex; gap: 2px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 4px;
+    box-shadow: 0 10px 26px rgba(0,0,0,.45);
+  }
+  .rx-pick button { border: none; background: transparent; font-size: 18px; line-height: 1; padding: 3px 4px; border-radius: 7px; }
+  .rx-pick button:hover { background: var(--panel); }
+
+  /* картинка в ленте и лайтбокс */
+  .media-box { margin: 3px 0 2px; }
+  .att-img {
+    max-width: min(360px, 100%); max-height: 320px; border-radius: 10px; display: block;
+    cursor: zoom-in; background: var(--panel2); object-fit: contain;
+  }
+  .lightbox { background: rgba(0,0,0,.92); z-index: 80; cursor: zoom-out; }
+  .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; display: block; }
+
+  /* полоска ответа и индикатор загрузки над полем ввода */
+  .reply-bar {
+    display: flex; align-items: center; gap: 8px; padding: 6px 18px;
+    background: var(--panel); border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--muted);
+  }
+  .reply-bar .rb-text {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    border-left: 3px solid var(--accent); padding-left: 8px;
+  }
+  .reply-bar .rb-x { border: none; background: transparent; color: var(--muted); font-size: 14px; flex: 0 0 auto; }
+  .reply-bar .rb-x:hover { color: var(--text); }
+  .composer.drag { background: rgba(88,101,242,.12); box-shadow: inset 0 0 0 1px var(--accent); }
+
+  /* поиск по истории */
+  .search-pane {
+    position: absolute; left: 0; right: 0; top: 56px; bottom: 0; z-index: 5;
+    background: var(--bg); display: flex; flex-direction: column;
+  }
+  .search-head { display: flex; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+  .search-head input {
+    flex: 1; min-width: 0; padding: 10px 13px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--text); outline: none;
+  }
+  .search-head input:focus { border-color: var(--accent); }
+  .search-head .tb-btn { width: 38px; height: 38px; flex: 0 0 38px; }
+  .search-list { flex: 1; overflow-y: auto; padding: 10px 12px 24px; }
+  .hit {
+    display: block; width: 100%; text-align: left; border: 1px solid transparent;
+    background: transparent; border-radius: 10px; padding: 8px 10px; color: inherit;
+  }
+  .hit:hover, .hit:focus-visible { background: var(--panel); border-color: var(--line); }
+  .hit-top { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--muted); }
+  .hit-who { color: var(--text); font-weight: 600; }
+  .hit-room { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hit-when { margin-left: auto; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  .hit-text { font-size: 13px; margin-top: 2px; word-break: break-word; }
+  .hit-text mark { background: rgba(250,166,26,.35); color: inherit; border-radius: 3px; padding: 0 1px; }
+
+  /* поиск людей */
+  .people-search { margin-bottom: 12px; }
+  .people-search input {
+    width: 100%; padding: 10px 13px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); outline: none;
+  }
+  .people-search input:focus { border-color: var(--accent); }
+  .frow.clickable { cursor: pointer; }
+  .frow.clickable:hover { background: var(--panel2); }
+
+  /* карточка профиля */
+  .card-dlg { width: min(400px, 100%); position: relative; }
+  .card-dlg .x-btn { position: absolute; top: 12px; right: 12px; }
+  .card-top { display: flex; align-items: center; gap: 14px; padding-right: 34px; }
+  .card-ava {
+    width: 64px; height: 64px; border-radius: 50%; flex: 0 0 64px; display: grid;
+    place-items: center; font-size: 24px; font-weight: 700; color: #fff;
+    overflow: hidden; background: var(--panel2);
+  }
+  .card-ava img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card-name { font-size: 18px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+  .card-login { font-size: 12px; color: var(--muted); }
+  .card-bio { margin: 12px 0 0; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  .card-meta { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  .card-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+
+  /* аккаунт: версия и предупреждение */
+  .ver-line { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .dlg .warn { color: var(--danger); font-weight: 600; }
+
+  @media (max-width: 760px) {
+    .att-img { max-width: min(260px, 100%); }
+    .search-head { padding: 10px 12px; }
+    .reply-bar { padding: 6px 12px; }
+  }
+</style>
+</head>
+<body>
+<div id="auth" class="auth">
+  <div class="auth-card">
+    <h1>Arc</h1>
+    <p class="hint">Аккаунт хранится на сервере: заходите с любого устройства под своим именем.</p>
+    <div class="tabs">
+      <button class="tab active" id="tabLogin">Вход</button>
+      <button class="tab" id="tabReg">Регистрация</button>
+    </div>
+    <input id="authName" placeholder="Имя (2–20 символов)" maxlength="20" autocomplete="username">
+    <input id="authPass" type="password" placeholder="Пароль" autocomplete="current-password">
+    <button class="primary" id="authGo">Войти</button>
+    <div class="err" id="authErr"></div>
+  </div>
+</div>
+
+<div class="app hidden" id="app">
+  <nav class="rail">
+    <div class="me" id="meAva">?</div>
+    <button class="rail-btn active" id="navChannels" title="Каналы">#</button>
+    <button class="rail-btn" id="navFriends" title="Друзья">👥</button>
+    <button class="rail-btn" id="navInvite" title="Пригласить друга">🔗</button>
+    <div class="rail-spacer"></div>
+    <button class="rail-btn" id="navSettings" title="Настройки">⚙</button>
+    <button class="rail-btn" id="navOut" title="Выйти из аккаунта">⏻</button>
+  </nav>
+
+  <aside class="side" id="side">
+    <div class="side-head" id="sideTitle">Каналы</div>
+    <div class="side-scroll">
+      <div class="side-label">Текстовые каналы</div>
+      <div id="channels"></div>
+      <button class="side-add" id="newChannel">+ создать канал</button>
+      <div class="side-label">Личные сообщения</div>
+      <div id="dmList"></div>
+    </div>
+    <div class="voice-box hidden" id="voiceBox">
+      <div class="voice-head" id="voiceHead">Голосовой канал</div>
+      <div id="voiceUsers"></div>
+      <div class="voice-actions">
+        <button class="pill" id="screenBtn" title="Показать свой экран всем в канале">Экран</button>
+        <button class="pill" id="callOpen" title="Развернуть звонок">Звонок</button>
+        <button class="pill on" id="micBtn">🎤 Микрофон</button>
+        <button class="pill danger" id="leaveVoice">Выйти</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="tt" id="topTitle"># obshiy</div>
+      <div class="pill" id="connState">подключение…</div>
+      <button class="tb-btn" id="searchBtn" type="button" title="Поиск по истории">🔍</button>
+    </header>
+    <div class="messages" id="messages"></div>
+    <div class="typing" id="typing"></div>
+    <div class="search-pane hidden" id="searchPane">
+      <div class="search-head">
+        <input id="searchQuery" placeholder="Поиск по истории" autocomplete="off" maxlength="100">
+        <button class="tb-btn" id="searchClose" type="button" title="Закрыть поиск">✕</button>
+      </div>
+      <div class="search-list" id="searchResults"></div>
+    </div>
+    <div class="friends hidden" id="friendsPane">
+      <div class="friends-head">
+        <input id="friendName" placeholder="Имя друга, например Дима" maxlength="20">
+        <button class="primary" id="friendAdd">Добавить</button>
+      </div>
+      <div class="people-search">
+        <input id="peopleQuery" placeholder="Найти людей" autocomplete="off" maxlength="32">
+      </div>
+      <div id="peopleResults"></div>
+      <div id="requests"></div>
+      <div id="friendList"></div>
+    </div>
+    <div class="emoji-panel hidden" id="emojiPanel">
+      <div class="ep-tabs">
+        <button type="button" class="ep-tab active" data-ep="emoji">Эмодзи</button>
+        <button type="button" class="ep-tab" data-ep="stickers">Стикеры</button>
+        <button type="button" class="ep-close" id="emojiClose" title="Закрыть">✕</button>
+      </div>
+      <div class="ep-body" id="epEmoji"></div>
+      <div class="ep-body hidden" id="epStickers"></div>
+    </div>
+    <div class="reply-bar hidden" id="replyBar">
+      <span class="rb-text" id="replyBarText"></span>
+      <button type="button" class="rb-x" id="replyBarClose" title="Отменить ответ">✕</button>
+    </div>
+    <div class="reply-bar hidden" id="mediaBar">
+      <span class="rb-text">отправляю картинку…</span>
+    </div>
+    <form class="composer" id="composer">
+      <button type="button" class="cbtn" id="attachBtn" title="Отправить картинку">📎</button>
+      <button type="button" class="cbtn" id="emojiBtn" title="Эмодзи и стикеры">🙂</button>
+      <input id="text" placeholder="Сообщение…" autocomplete="off" maxlength="4000">
+      <button class="primary" id="send" type="submit">→</button>
+      <input type="file" id="mediaFile" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
+    </form>
+  </main>
+</div>
+<div class="modal-back hidden" id="settingsModal">
+  <div class="settings" role="dialog" aria-label="Настройки">
+    <div class="settings-nav">
+      <div class="s-head"><h3>Настройки</h3><button class="s-close" id="settingsClose" title="Закрыть">✕</button></div>
+      <button data-tab="profile" class="active">Мой профиль</button>
+      <button data-tab="appearance">Внешний вид</button>
+      <button data-tab="notify">Уведомления</button>
+      <button data-tab="privacy">Приватность</button>
+      <button data-tab="voice">Голос и видео</button>
+      <button data-tab="stickers">Стикеры и эмодзи</button>
+      <button data-tab="bridges">Мосты и сервер</button>
+      <button data-tab="account">Аккаунт</button>
+    </div>
+    <div class="settings-body" id="settingsBody"></div>
+  </div>
+</div>
+<div class="call hidden" id="callStage">
+  <div class="call-head">
+    <div class="call-title" id="callTitle">Звонок</div>
+    <div class="call-people" id="callCount"></div>
+    <button class="cbtn" id="callClose" title="Свернуть">✕</button>
+  </div>
+  <div class="screen-stage hidden" id="screenStage">
+    <video id="screenVideo" autoplay playsinline muted></video>
+    <div class="screen-cap" id="screenCap"></div>
+  </div>
+  <div class="call-grid" id="callGrid"></div>
+</div>
+<div class="modal-back hidden" id="dlgBack">
+  <div class="dlg" role="dialog" aria-modal="true">
+    <h3 id="dlgTitle">Заголовок</h3>
+    <p id="dlgText"></p>
+    <input id="dlgInput" class="hidden" maxlength="40" autocomplete="off" spellcheck="false">
+    <div class="dlg-row">
+      <button id="dlgCancel" type="button">Отмена</button>
+      <button id="dlgOk" class="ok" type="button">Готово</button>
+    </div>
+  </div>
+</div>
+<div class="modal-back hidden" id="srcBack">
+  <div class="dlg src-dlg" role="dialog" aria-modal="true">
+    <h3>Что показать</h3>
+    <p>Выберите экран или окно. На Windows вместе с экраном передаётся и звук системы.</p>
+    <div class="src-tabs" id="srcTabs">
+      <button type="button" data-kind="screen" class="on">Экраны</button>
+      <button type="button" data-kind="window">Окна</button>
+    </div>
+    <div class="src-list" id="srcList"></div>
+    <div class="dlg-row">
+      <button id="srcCancel" type="button">Отмена</button>
+    </div>
+  </div>
+</div>
+<div class="modal-back hidden" id="lightbox">
+  <img id="lightboxImg" alt="картинка">
+</div>
+<div class="modal-back hidden" id="cardBack">
+  <div class="dlg card-dlg" id="cardBody" role="dialog" aria-modal="true" aria-label="Профиль"></div>
+</div>
+<div class="modal-back hidden" id="delBack">
+  <div class="dlg" role="dialog" aria-modal="true" aria-label="Удаление аккаунта">
+    <h3>Удалить аккаунт?</h3>
+    <p class="warn">Аккаунт удаляется навсегда: профиль, друзья, переписка и все сессии. Вернуть его нельзя.</p>
+    <input id="delPass" type="password" placeholder="Пароль" autocomplete="current-password">
+    <div class="dlg-row">
+      <button id="delCancel" type="button">Отмена</button>
+      <button id="delOk" class="ok danger" type="button">Удалить навсегда</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const APP_VERSION = '1.4.2';
+// В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
+// приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
+// отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
+const SERVER = String(window.__ARC_SERVER__ || '').replace(/\/+$/, '');
+function netUrl(path) {
+  const text = String(path || '');
+  if (!text) return '';
+  if (/^(https?:|data:|blob:|capacitor:)/i.test(text)) return text;
+  if (!SERVER) return text;
+  return SERVER + (text.charAt(0) === '/' ? text : '/' + text);
+}
+function netSocket() {
+  if (SERVER) return SERVER.replace(/^http/i, 'ws');
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return proto + '//' + location.host;
+}
+const store = {
+  token: localStorage.getItem('token') || '',
+  me: null,
+  channels: [],
+  room: 'obshiy',
+  roomKind: 'channel',
+  roomTitle: '# obshiy',
+  messages: {},
+  friends: { friends: [], incoming: [], outgoing: [] },
+  online: [],
+  statuses: {},
+  profiles: {},
+  unread: {},
+  dms: [],
+  avatars: {},
+  stickers: [],
+  screenStream: null,
+  screenOn: false,
+  screenSender: '',
+  voiceLimit: 8,
+  callHidden: false,
+  ws: null,
+  voiceRoom: null,
+  voiceUsers: [],
+  muted: false,
+  localStream: null,
+  peers: new Map(),
+  reconnect: null,
+  reconnectTries: 0,
+  lastSeen: 0,
+  heartbeat: null,
+  settings: null,
+  profile: null,
+  installPrompt: null,
+  // 1.4.0
+  appVersion: APP_VERSION,
+  pushKey: '',
+  replyTo: null,
+  searchQ: '',
+  searchHits: null,
+  searchLoading: false,
+  people: null,
+  card: null,
+  pendingScroll: null,
+  pendingTimer: null,
+  uploading: 0,
+};
+let authMode = 'login';
+
+/* ------------------------------------------------------------------ утилиты */
+function toast(text) {
+  const box = $('toast');
+  box.textContent = text;
+  box.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => box.classList.remove('show'), 2600);
+}
+/* ------------------------------------------------------------------ диалог */
+let dlgResolve = null;
+function openDialog(opts) {
+  const o = opts || {};
+  const back = $('dlgBack');
+  if (!back) return Promise.resolve(o.input ? null : true);
+  $('dlgTitle').textContent = o.title || '';
+  const text = $('dlgText');
+  text.textContent = o.text || '';
+  text.classList.toggle('hidden', !o.text);
+  const input = $('dlgInput');
+  input.classList.toggle('hidden', !o.input);
+  input.value = o.input ? (o.value || '') : '';
+  input.placeholder = o.placeholder || '';
+  const ok = $('dlgOk');
+  ok.textContent = o.ok || 'Готово';
+  ok.classList.toggle('danger', !!o.danger);
+  back.classList.remove('hidden');
+  setTimeout(() => { o.input ? input.focus() : ok.focus(); }, 40);
+  return new Promise((resolve) => { dlgResolve = resolve; });
+}
+function closeDialog(result) {
+  const back = $('dlgBack');
+  if (back) back.classList.add('hidden');
+  const fn = dlgResolve;
+  dlgResolve = null;
+  if (fn) fn(result);
+}
+function dialogAccept() {
+  const input = $('dlgInput');
+  const isInput = input && !input.classList.contains('hidden');
+  closeDialog(isInput ? input.value.trim() : true);
+}
+if ($('dlgOk')) $('dlgOk').onclick = dialogAccept;
+if ($('dlgCancel')) $('dlgCancel').onclick = () => closeDialog(null);
+if ($('dlgBack')) {
+  $('dlgBack').addEventListener('click', (e) => { if (e.target === $('dlgBack')) closeDialog(null); });
+  $('dlgInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dialogAccept(); } });
+}
+document.addEventListener('keydown', (e) => {
+  const back = $('dlgBack');
+  if (e.key === 'Escape' && back && !back.classList.contains('hidden')) { e.stopPropagation(); closeDialog(null); }
+}, true);
+
+function colorOf(name) {
+  let h = 0;
+  for (const ch of name || '?') h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `hsl(${h} 55% 48%)`;
+}
+function initials(name) {
+  const parts = (name || '?').trim().split(/\s+/);
+  return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+}
+function timeOf(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+function send(obj) {
+  if (store.ws && store.ws.readyState === 1) store.ws.send(JSON.stringify(obj));
+  else toast('Нет соединения с сервером');
+}
+function avatarUrlOf(name) {
+  if (!name) return '';
+  return store.avatars[String(name).toLowerCase()] || '';
+}
+function rememberAvatar(name, url) {
+  if (!name) return;
+  const key = String(name).toLowerCase();
+  if (url) store.avatars[key] = url;
+  else delete store.avatars[key];
+}
+function avatar(name) {
+  const el = document.createElement('div');
+  el.className = 'ava';
+  const url = avatarUrlOf(name);
+  if (url) {
+    const img = document.createElement('img');
+    img.src = netUrl(url);
+    img.alt = '';
+    img.loading = 'lazy';
+    el.style.background = 'var(--panel2)';
+    el.appendChild(img);
+    return el;
+  }
+  el.style.background = colorOf(name);
+  el.textContent = initials(name);
+  return el;
+}
+
+/* ------------------------------------------------- профили, статусы, непрочитанное */
+function rememberProfile(name, profile) {
+  if (!name || !profile) return;
+  store.profiles[String(name).toLowerCase()] = profile;
+  if (profile.avatarUrl !== undefined) rememberAvatar(name, profile.avatarUrl);
+}
+function profileOf(name) {
+  return store.profiles[String(name).toLowerCase()] || null;
+}
+function displayNameOf(name, profile) {
+  // Свежий профиль из store важнее того, что было в момент отправки сообщения:
+  // человек мог переименоваться, и старое имя в списке — это баг.
+  const p = profileOf(name) || profile;
+  return (p && p.displayName) || name || '?';
+}
+// Ключ личного чата строится так же, как на сервере: два логина по алфавиту.
+function dmRoomOf(a, b) {
+  const first = String(a).toLowerCase();
+  const second = String(b).toLowerCase();
+  return 'dm:' + (first <= second ? first + '|' + second : second + '|' + first);
+}
+function roomIsVisible(room) {
+  if (!room || room !== store.room) return false;
+  if (document.visibilityState !== 'visible') return false;
+  const pane = $('messages');
+  return !!pane && !pane.classList.contains('hidden');
+}
+function unreadOf(room) {
+  return (store.unread && store.unread[room]) || 0;
+}
+function bumpUnread(room) {
+  if (!room) return;
+  if (!store.unread) store.unread = {};
+  store.unread[room] = (store.unread[room] || 0) + 1;
+  updateTitle();
+  renderChannels(); // иначе счётчик появится только при следующей перерисовке
+}
+function clearUnread(room) {
+  if (!room || !store.unread || !store.unread[room]) return;
+  delete store.unread[room];
+  updateTitle();
+  renderChannels();
+}
+function totalUnread() {
+  return Object.values(store.unread || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+}
+function updateTitle() {
+  const total = totalUnread();
+  document.title = (total ? '(' + total + ') ' : '') + 'Arc';
+  // Бейдж на иконке приложения в десктопной оболочке (0 — снять).
+  try {
+    const bridge = window.messengerDesktop;
+    if (bridge && typeof bridge.setBadge === 'function') bridge.setBadge(total);
+  } catch (error) {}
+}
+function isOnline(name) {
+  return (store.online || []).some((n) => n.toLowerCase() === String(name).toLowerCase());
+}
+function statusOfName(name) {
+  return (store.statuses && store.statuses[String(name).toLowerCase()]) || '';
+}
+function statusLabel(name, fallback) {
+  if (!isOnline(name)) return 'не в сети';
+  const status = statusOfName(name) || fallback || 'online';
+  if (status === 'dnd') return 'не беспокоить';
+  if (status === 'idle') return 'не активен';
+  if (status === 'invisible') return 'не в сети';
+  return 'в сети';
+}
+function statusColor(name, fallback) {
+  if (!isOnline(name)) return 'var(--muted)';
+  const status = statusOfName(name) || fallback || 'online';
+  if (status === 'dnd') return 'var(--danger)';
+  if (status === 'idle') return '#faa61a';
+  return 'var(--ok)';
+}
+
+/* ------------------------------------------------------------------ вход */
+function setAuthMode(mode) {
+  authMode = mode;
+  $('tabLogin').classList.toggle('active', mode === 'login');
+  $('tabReg').classList.toggle('active', mode === 'register');
+  $('authGo').textContent = mode === 'login' ? 'Войти' : 'Создать аккаунт';
+  $('authPass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('authErr').textContent = '';
+}
+$('tabLogin').onclick = () => setAuthMode('login');
+$('tabReg').onclick = () => setAuthMode('register');
+$('authPass').onkeydown = (e) => { if (e.key === 'Enter') goAuth(); };
+$('authName').onkeydown = (e) => { if (e.key === 'Enter') $('authPass').focus(); };
+
+async function goAuth() {
+  const name = $('authName').value.trim();
+  const password = $('authPass').value;
+  if (!name || !password) { $('authErr').textContent = 'Введите имя и пароль'; return; }
+  $('authGo').disabled = true;
+  try {
+    const res = await fetch(netUrl('/api/' + (authMode === 'login' ? 'login' : 'register')), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) { $('authErr').textContent = data.error || 'Не получилось'; return; }
+    store.token = data.token;
+    localStorage.setItem('token', data.token);
+    start();
+  } catch (e) {
+    $('authErr').textContent = 'Сервер не отвечает. Проверьте интернет и попробуйте ещё раз.';
+  } finally {
+    $('authGo').disabled = false;
+  }
+}
+$('authGo').onclick = goAuth;
+$('navOut').onclick = () => {
+  if (!confirm('Выйти из аккаунта?')) return;
+  // Просим сервер погасить токен, иначе он остаётся действительным навсегда.
+  if (store.ws && store.ws.readyState === 1) store.ws.send(JSON.stringify({ t: 'logout' }));
+  store.token = '';
+  localStorage.removeItem('token');
+  setTimeout(() => location.reload(), 150);
+};
+
+/* ------------------------------------------------------------------ соединение */
+function start() {
+  $('auth').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  connect();
+}
+
+function connect() {
+  const ws = new WebSocket(`${netSocket()}/ws?token=${encodeURIComponent(store.token)}`);
+  store.ws = ws;
+  store.lastSeen = Date.now();
+  $('connState').textContent = 'подключение…';
+  $('connState').style.color = 'var(--muted)';
+
+  // Сердцебиение: браузер не умеет send ping-кадры, поэтому шлём своё
+  // сообщение и закрываем сокет, если сервер молчит дольше минуты.
+  clearInterval(store.heartbeat);
+  store.heartbeat = setInterval(() => {
+    if (store.ws !== ws) return;
+    if (Date.now() - store.lastSeen > 65000) {
+      try { ws.close(); } catch (error) {}
+      return;
+    }
+    if (ws.readyState === 1) {
+      try { ws.send('{"t":"ping"}'); } catch (error) {}
+    }
+  }, 25000);
+
+  ws.onopen = () => {
+    $('connState').textContent = 'на связи';
+    $('connState').style.color = 'var(--ok)';
+  };
+  ws.onmessage = (event) => {
+    store.lastSeen = Date.now();
+    let data;
+    try { data = JSON.parse(event.data); } catch { return; }
+    handle(data);
+  };
+  ws.onclose = () => {
+    clearInterval(store.heartbeat);
+    if (store.ws !== ws) return; // закрылся старый сокет после переподключения
+    if (!store.me) { authExpired(); return; }
+    store.reconnectTries += 1;
+    if (store.reconnectTries > 6) {
+      authExpired('Не удалось восстановить связь — войдите снова');
+      return;
+    }
+    $('connState').textContent = 'переподключение…';
+    $('connState').style.color = 'var(--danger)';
+    clearTimeout(store.reconnect);
+    const delay = Math.min(12000, 800 + store.reconnectTries * 700);
+    store.reconnect = setTimeout(connect, delay);
+  };
+}
+
+// Возврат к экрану входа: токен больше не принимается или связь не встала.
+function authExpired(message) {
+  clearInterval(store.heartbeat);
+  clearTimeout(store.reconnect);
+  store.me = null;
+  store.reconnectTries = 0;
+  store.token = '';
+  localStorage.removeItem('token');
+  if (store.ws) {
+    const old = store.ws;
+    store.ws = null;
+    try { old.onclose = null; old.close(); } catch (error) {}
+  }
+  $('app').classList.add('hidden');
+  $('auth').classList.remove('hidden');
+  $('authErr').textContent = message || 'Сессия истекла — войдите снова';
+  updateTitle();
+}
+
+function handle(data) {
+  switch (data.t) {
+    case 'hello': {
+      store.me = data.me;
+      store.channels = data.channels || [];
+      store.reconnectTries = 0;
+      store.lastSeen = Date.now();
+      store.pushKey = data.pushKey ? String(data.pushKey) : '';
+      if (data.version) store.appVersion = String(data.version);
+      clearTypers();
+      if (Array.isArray(data.avatars)) {
+        for (const item of data.avatars) rememberAvatar(item.name, item.url);
+      }
+      const meProfile = data.profile || (data.me && data.me.profile) || null;
+      if (meProfile) store.profile = meProfile;
+      if (meProfile) {
+        rememberProfile(data.me && data.me.name, meProfile);
+        rememberAvatar(data.me && data.me.name, meProfile.avatarUrl);
+      }
+      const meSettings = data.settings || (data.me && data.me.settings) || null;
+      if (meSettings) {
+        applySettings(meSettings);
+        if (data.me) store.statuses[String(data.me.name).toLowerCase()] = meSettings.status || 'online';
+      }
+      renderMe();
+      renderChannels();
+      const params = new URLSearchParams(location.search);
+      if (params.get('room') && store.channels.indexOf(params.get('room')) >= 0) {
+        openRoom(params.get('room'), 'channel', '# ' + params.get('room'));
+      }
+      if (params.get('settings')) setTimeout(() => openSettings(currentTab), 60);
+      send({ t: 'join', room: store.room });
+      if (store.voiceRoom) send({ t: 'voice_join', room: store.voiceRoom });
+      askNotifyPermission();
+      maybeSubscribePush();
+      break;
+    }
+    case 'channels': {
+      store.channels = data.channels || [];
+      if (store.voiceRoom && store.channels.indexOf(store.voiceRoom) < 0) {
+        // Канал удалили, пока мы в нём сидели: выключаем микрофон и экран.
+        leaveVoice(true);
+      }
+      for (const room of Object.keys(store.unread || {})) {
+        if (!room.startsWith('dm:') && store.channels.indexOf(room) < 0) delete store.unread[room];
+      }
+      updateTitle();
+      if (store.roomKind === 'channel' && store.room && store.channels.indexOf(store.room) < 0) {
+        openRoom(store.channels[0] || 'obshiy', 'channel', '# ' + (store.channels[0] || 'obshiy'));
+      } else {
+        renderChannels();
+      }
+      break;
+    }
+    case 'channel_created': {
+      if (data.room && store.channels.indexOf(data.room) >= 0) {
+        openRoom(data.room, 'channel', '# ' + data.room);
+      }
+      break;
+    }
+    case 'profile': {
+      if (data.profile) store.profile = data.profile;
+      if (store.me && data.profile) rememberProfile(store.me.name, data.profile);
+      rememberAvatar(store.me && store.me.name, data.profile && data.profile.avatarUrl);
+      renderMe();
+      renderFriends();
+      renderMessages();
+      if (settingsOpen()) renderSettings(currentTab);
+      toast('Профиль сохранён');
+      break;
+    }
+    case 'settings': {
+      applySettings(data.settings || (store.me && store.me.settings) || {});
+      if (store.me) store.statuses[String(store.me.name).toLowerCase()] = S().status || 'online';
+      if (settingsOpen()) renderSettings(currentTab);
+      break;
+    }
+    case 'history': {
+      if (!store.room && store.roomKind === 'dm') store.room = data.room;
+      store.messages[data.room] = data.messages || [];
+      for (const one of store.messages[data.room]) {
+        rememberAvatar(one.author, one.authorProfile && one.authorProfile.avatarUrl);
+        rememberProfile(one.author, one.authorProfile);
+      }
+      clearUnread(data.room);
+      if (data.room === store.room) {
+        renderMessages({ force: true });
+        applyPendingScroll(data.room);
+      }
+      break;
+    }
+    case 'msg': {
+      const list = store.messages[data.room] || (store.messages[data.room] = []);
+      rememberAvatar(data.author, data.authorProfile && data.authorProfile.avatarUrl);
+      rememberProfile(data.author, data.authorProfile);
+      list.push(data);
+      const mine = store.me && data.author === store.me.name;
+      if (data.room === store.room) renderMessages({ force: !!mine });
+      if (!roomIsVisible(data.room)) bumpUnread(data.room);
+      notifyMessage(data);
+      break;
+    }
+    case 'msg_delete': {
+      const list = store.messages[data.room];
+      if (list) {
+        const index = list.findIndex((m) => m.id === data.id);
+        if (index >= 0) list.splice(index, 1);
+      }
+      if (data.room === store.room) renderMessages();
+      break;
+    }
+    case 'msg_reaction': {
+      const list = store.messages[data.room];
+      if (list) {
+        const one = list.find((m) => m.id === data.id);
+        if (one) one.reactions = data.reactions && typeof data.reactions === 'object' ? data.reactions : {};
+      }
+      // Перерисовываем без прыжка: renderMessages сам сохраняет прокрутку,
+      // если пользователь читает историю выше низа ленты.
+      if (data.room === store.room) renderMessages();
+      break;
+    }
+    case 'search_results': {
+      store.searchQ = data.q || store.searchQ;
+      store.searchHits = Array.isArray(data.hits) ? data.hits : [];
+      store.searchLoading = false;
+      if (searchPanelOpen()) renderSearchResults();
+      break;
+    }
+    case 'user_search': {
+      store.people = { q: data.q || '', results: Array.isArray(data.results) ? data.results : [] };
+      for (const one of store.people.results) {
+        rememberProfile(one.name, one);
+        rememberAvatar(one.name, one.avatarUrl);
+      }
+      renderPeople();
+      break;
+    }
+    case 'user_card': {
+      if (data.user) {
+        rememberProfile(data.user.name, data.user);
+        rememberAvatar(data.user.name, data.user.avatarUrl);
+        store.card = { name: data.user.name, user: data.user };
+        renderUserCard();
+        const back = $('cardBack');
+        if (back) back.classList.remove('hidden');
+      }
+      break;
+    }
+    case 'account_deleted': {
+      closeSettings();
+      closeUserCard();
+      hideLightbox();
+      closeSearchPanel();
+      closeDeleteAccount();
+      store.token = '';
+      localStorage.removeItem('token');
+      authExpired('Аккаунт удалён');
+      break;
+    }
+    case 'typing': {
+      handleTyping(data);
+      break;
+    }
+    case 'presence': {
+      store.online = data.online || [];
+      store.statuses = data.statuses || {};
+      renderFriends();
+      renderChannels();
+      break;
+    }
+    case 'friends': {
+      store.friends = data;
+      for (const one of [...(data.friends || []), ...(data.incoming || []), ...(data.outgoing || [])]) {
+        rememberProfile(one.name, one);
+      }
+      renderFriends();
+      break;
+    }
+    case 'dm_list': {
+      store.dms = data.items || [];
+      for (const item of store.dms) {
+        rememberAvatar(item.name, item.avatarUrl);
+        rememberProfile(item.name, item);
+      }
+      renderChannels();
+      break;
+    }
+    case 'profile_changed': {
+      rememberProfile(data.name, data.profile);
+      renderMe();
+      renderChannels();
+      renderFriends();
+      renderMessages();
+      renderCall();
+      break;
+    }
+    case 'logged_out': {
+      authExpired('Вы вышли из аккаунта');
+      break;
+    }
+    case 'voice_state': {
+      handleVoiceState(data);
+      break;
+    }
+    case 'rtc': {
+      handleRtc(data);
+      break;
+    }
+    case 'avatar_changed': {
+      rememberAvatar(data.name, data.url);
+      renderMe();
+      renderChannels();
+      renderFriends();
+      renderMessages();
+      renderVoiceBox();
+      renderCall();
+      if (settingsOpen()) renderSettings(currentTab);
+      break;
+    }
+    case 'sticker_pack': {
+      store.stickers = data.items || [];
+      renderEmojiPanel();
+      if (settingsOpen()) renderSettings(currentTab);
+      break;
+    }
+    case 'matrix_state': {
+      store.matrix = data.matrix || {};
+      if (settingsOpen() && currentTab === 'bridges') renderSettings('bridges');
+      if (data.test) toast(data.test.ok ? 'Matrix: связь есть, ' + (data.test.userId || '') : 'Matrix: ' + (data.test.error || 'нет связи'));
+      else if (data.pull) toast(data.pull.ok ? 'Из Matrix забрано сообщений: ' + (data.pull.added || 0) : 'Matrix: ' + (data.pull.error || 'не удалось'));
+      break;
+    }
+    case 'error': {
+      const text = data.text || 'Ошибка';
+      // Голосовой канал переполнен — не пытаемся входить в него повторно.
+      if (store.voiceRoom && text.indexOf('не помещается') >= 0) leaveVoice(true);
+      toast(text);
+      break;
+    }
+    case 'notice': {
+      toast(data.text || '');
+      break;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ каналы и друзья */
+function renderChannels() {
+  const box = $('channels');
+  box.innerHTML = '';
+  for (const channel of store.channels) {
+    const btn = document.createElement('button');
+    btn.className = 'chan' + (store.roomKind === 'channel' && store.room === channel ? ' active' : '');
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = '# ' + channel;
+    btn.appendChild(nm);
+
+    const unread = unreadOf(channel);
+    if (unread) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = unread > 99 ? '99+' : String(unread);
+      btn.appendChild(badge);
+    }
+
+    const inThis = store.voiceRoom === channel;
+    const mic = document.createElement('span');
+    mic.className = 'mic';
+    mic.textContent = inThis ? '🔊' : '🎧';
+    mic.title = inThis ? 'Вы в голосовом канале' : 'Войти в голосовой канал';
+    mic.onclick = (e) => {
+      e.stopPropagation();
+      inThis ? leaveVoice() : joinVoice(channel);
+    };
+    btn.appendChild(mic);
+
+    if (channel !== 'obshiy') {
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.type = 'button';
+      del.title = 'Удалить чат';
+      del.textContent = '✕';
+      del.onclick = async (e) => {
+        e.stopPropagation();
+        const ok = await openDialog({
+          title: 'Удалить чат #' + channel + '?',
+          text: 'Чат исчезнет у всех участников вместе с сообщениями. Друзья и настройки не пострадают.',
+          ok: 'Удалить',
+          danger: true,
+        });
+        if (ok) send({ t: 'channel_delete', room: channel });
+      };
+      btn.appendChild(del);
+    }
+    btn.onclick = () => openRoom(channel, 'channel', '# ' + channel);
+    box.appendChild(btn);
+  }
+
+  const dms = $('dmList');
+  dms.innerHTML = '';
+  for (const item of store.dms) {
+    const btn = document.createElement('button');
+    btn.className = 'chan' + (store.roomKind === 'dm' && store.room === item.room ? ' active' : '');
+    const dot = document.createElement('span');
+    dot.className = 'vdot';
+    dot.style.background = statusColor(item.name);
+    btn.appendChild(dot);
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = displayNameOf(item.name, item);
+    nm.title = item.name;
+    btn.appendChild(nm);
+
+    const unread = unreadOf(item.room);
+    if (unread) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = unread > 99 ? '99+' : String(unread);
+      btn.appendChild(badge);
+    }
+
+    btn.onclick = () => openRoom(item.room, 'dm', '@ ' + displayNameOf(item.name, item), item.name);
+
+    const dmDel = document.createElement('button');
+    dmDel.className = 'del';
+    dmDel.type = 'button';
+    dmDel.title = 'Убрать чат из списка';
+    dmDel.textContent = '✕';
+    dmDel.onclick = async (e) => {
+      e.stopPropagation();
+      const ok = await openDialog({
+        title: 'Убрать чат с ' + (item.displayName || item.name) + '?',
+        text: 'Переписка скроется из списка у вас. Если напишете друг другу снова, чат вернётся.',
+        ok: 'Убрать',
+        danger: true,
+      });
+      if (ok) send({ t: 'dm_delete', name: item.name });
+    };
+    btn.appendChild(dmDel);
+    dms.appendChild(btn);
+  }
+  if (!store.dms.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'Пока пусто — добавьте друга по имени';
+    dms.appendChild(empty);
+  }
+  renderVoiceBox();
+}
+
+function openRoom(room, kind, title, peerName) {
+  store.room = room || null;
+  store.roomKind = kind;
+  store.roomTitle = title;
+  store.roomPeer = peerName || null;
+  $('topTitle').textContent = title;
+  $('friendsPane').classList.add('hidden');
+  $('messages').classList.remove('hidden');
+  $('composer').classList.remove('hidden');
+  $('navFriends').classList.remove('active');
+  $('navChannels').classList.add('active');
+  $('side').classList.remove('open');
+  closeSearchPanel();
+  closeReactionPicker();
+  clearReply();
+  $('searchBtn').classList.remove('hidden');
+  clearTypers();
+  clearUnread(room);
+  renderChannels();
+  renderMessages({ force: true });
+  if (kind === 'dm') {
+    const other = peerName || title.replace(/^@ /, '');
+    send({ t: 'dm_open', name: other });
+  } else {
+    send({ t: 'join', room });
+  }
+}
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '😮', '😢'];
+
+function renderMessages(options) {
+  const opts = options || {};
+  const box = $('messages');
+  const list = store.messages[store.room] || [];
+  const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
+  const prevTop = box.scrollTop;
+  closeReactionPicker();
+  box.innerHTML = '';
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">Сообщений пока нет — напишите первым.</div>';
+    return;
+  }
+  for (const m of list) box.appendChild(buildMessageRow(m));
+  if (opts.force || wasNearBottom) scrollDown();
+  else box.scrollTop = prevTop;
+}
+function scrollDown() {
+  const box = $('messages');
+  box.scrollTop = box.scrollHeight;
+}
+
+/* --------------------------------------------------- сообщение: цитата, реакции, картинка */
+function messageOf(room, id) {
+  const list = store.messages[room] || [];
+  return list.find((m) => m.id === id) || null;
+}
+// Оригинал цитаты ищем в загруженной истории: если его нет — сообщение удалено.
+function replySource(m) {
+  if (!m || !m.reply || m.reply.id == null) return null;
+  return messageOf(m.room, m.reply.id);
+}
+function replyQuoteText(m, orig) {
+  if (!orig) return 'сообщение удалено';
+  if (orig.media && orig.media.url) return m.reply.text ? 'картинка · ' + m.reply.text : 'картинка';
+  if (orig.sticker && orig.sticker.url) return 'стикер';
+  return m.reply.text || orig.text || '';
+}
+function replyQuoteNode(m) {
+  if (!m.reply || m.reply.id == null) return null;
+  const orig = replySource(m);
+  const quote = document.createElement('div');
+  quote.className = 'reply-quote' + (orig ? '' : ' gone');
+  const who = document.createElement('span');
+  who.className = 'rq-author';
+  who.textContent = displayNameOf(m.reply.author) + ':';
+  const text = document.createElement('span');
+  text.className = 'rq-text';
+  text.textContent = replyQuoteText(m, orig);
+  quote.append(who, text);
+  quote.title = orig ? 'Перейти к сообщению' : 'Сообщение удалено';
+  if (orig) quote.onclick = (event) => { event.stopPropagation(); jumpToMessage(m.room, m.reply.id); };
+  return quote;
+}
+function reactionsNode(m) {
+  const map = m.reactions && typeof m.reactions === 'object' ? m.reactions : null;
+  if (!map) return null;
+  const emojis = Object.keys(map).filter((e) => Array.isArray(map[e]) && map[e].length);
+  if (!emojis.length) return null;
+  const row = document.createElement('div');
+  row.className = 'rx-row';
+  const me = store.me ? String(store.me.name).toLowerCase() : '';
+  for (const emoji of emojis) {
+    const names = map[emoji];
+    const mine = names.some((name) => String(name).toLowerCase() === me);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'rx' + (mine ? ' mine' : '');
+    chip.textContent = emoji + ' ' + names.length;
+    chip.title = names.join(', ') + (mine ? ' · вы' : '');
+    chip.onclick = (event) => { event.stopPropagation(); toggleReaction(m, emoji); };
+    row.appendChild(chip);
+  }
+  return row;
+}
+function toggleReaction(m, emoji) {
+  if (!m || !m.room || m.id == null) return;
+  closeReactionPicker();
+  send({ t: 'msg_react', room: m.room, id: m.id, emoji });
+}
+let reactionPicker = null;
+function closeReactionPicker() {
+  if (reactionPicker && reactionPicker.parentNode) reactionPicker.parentNode.removeChild(reactionPicker);
+  reactionPicker = null;
+}
+function openReactionPicker(row, m) {
+  if (!row || !m) return;
+  if (reactionPicker && reactionPicker.dataset.for === String(m.room) + ':' + String(m.id)) {
+    closeReactionPicker();
+    return;
+  }
+  closeReactionPicker();
+  const box = document.createElement('div');
+  box.className = 'rx-pick';
+  box.dataset.for = String(m.room) + ':' + String(m.id);
+  for (const emoji of QUICK_REACTIONS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = emoji;
+    btn.title = 'Реакция ' + emoji;
+    btn.onclick = (event) => { event.stopPropagation(); toggleReaction(m, emoji); };
+    box.appendChild(btn);
+  }
+  row.appendChild(box);
+  reactionPicker = box;
+}
+function mediaNode(m) {
+  if (!m.media || !m.media.url) return null;
+  const box = document.createElement('div');
+  box.className = 'media-box';
+  const img = document.createElement('img');
+  img.className = 'att-img';
+  img.src = netUrl(m.media.url);
+  img.alt = 'картинка';
+  img.loading = 'lazy';
+  img.onclick = (event) => { event.stopPropagation(); openLightbox(m.media.url); };
+  box.appendChild(img);
+  return box;
+}
+function messageToolsNode(m, row) {
+  const tools = document.createElement('div');
+  tools.className = 'msg-tools';
+  const react = document.createElement('button');
+  react.type = 'button';
+  react.className = 'rx-add';
+  react.title = 'Поставить реакцию';
+  react.textContent = '+';
+  react.onclick = (event) => { event.stopPropagation(); openReactionPicker(row, m); };
+  tools.appendChild(react);
+  const reply = document.createElement('button');
+  reply.type = 'button';
+  reply.className = 'reply-btn';
+  reply.title = 'Ответить на сообщение';
+  reply.textContent = 'Ответить';
+  reply.onclick = (event) => { event.stopPropagation(); setReply(m); };
+  tools.appendChild(reply);
+  if (store.me && m.author === store.me.name && m.id) {
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'del-msg';
+    del.title = 'Удалить сообщение';
+    del.textContent = '✕';
+    del.onclick = async () => {
+      const ok = await openDialog({
+        title: 'Удалить сообщение?',
+        text: 'Оно исчезнет у всех участников.',
+        ok: 'Удалить',
+        danger: true,
+      });
+      if (ok) send({ t: 'msg_delete', room: m.room, id: m.id });
+    };
+    tools.appendChild(del);
+  }
+  return tools;
+}
+function buildMessageRow(m) {
+  const row = document.createElement('div');
+  row.className = 'msg';
+  if (m.id != null) row.dataset.id = String(m.id);
+  const ava = avatar(m.author);
+  ava.style.cursor = 'pointer';
+  ava.title = 'Открыть профиль ' + displayNameOf(m.author, m.authorProfile);
+  ava.onclick = () => openUserCard(m.author);
+  row.appendChild(ava);
+
+  const col = document.createElement('div');
+  const head = document.createElement('div');
+  head.className = 'head';
+  const who = document.createElement('button');
+  who.type = 'button';
+  who.className = 'who';
+  const shown = displayNameOf(m.author, m.authorProfile);
+  who.textContent = shown;
+  if (shown !== m.author) who.title = m.author;
+  who.style.color = colorOf(m.author);
+  who.onclick = (event) => { event.stopPropagation(); openUserCard(m.author); };
+  const when = document.createElement('span');
+  when.className = 'when';
+  when.textContent = timeOf(m.ts);
+  head.append(who, when);
+  col.appendChild(head);
+
+  const quote = replyQuoteNode(m);
+  if (quote) col.appendChild(quote);
+
+  const media = mediaNode(m);
+  if (media) col.appendChild(media);
+
+  const body = document.createElement('div');
+  body.className = 'body';
+  const sticker = m.sticker && m.sticker.url ? m.sticker : null;
+  if (sticker) {
+    const img = document.createElement('img');
+    img.className = 'sticker-img';
+    img.src = netUrl(sticker.url);
+    img.alt = sticker.name || 'стикер';
+    img.loading = 'lazy';
+    body.appendChild(img);
+    if (m.text) {
+      const cap = document.createElement('div');
+      cap.textContent = m.text;
+      body.appendChild(cap);
+    }
+  } else {
+    body.textContent = m.text || '';
+  }
+  col.appendChild(body);
+
+  const rx = reactionsNode(m);
+  if (rx) col.appendChild(rx);
+  row.appendChild(col);
+  row.appendChild(messageToolsNode(m, row));
+  return row;
+}
+
+/* --------------------------------------------------- ответы: полоска над полем ввода */
+function declineName(name) {
+  const full = String(name || '').trim();
+  if (!full) return '';
+  const parts = full.split(/\s+/);
+  const last = parts[parts.length - 1];
+  let changed = last;
+  if (/^[а-яё]+$/i.test(last)) {
+    if (/[бвгджзклмнпрстфхцчшщ]$/i.test(last)) changed = last + 'у';
+    else if (/[ая]$/i.test(last)) changed = last.slice(0, -1) + 'е';
+    else if (/[йь]$/i.test(last)) changed = last.slice(0, -1) + 'ю';
+    else if (/[ое]$/i.test(last)) changed = last;
+    else if (/[уюыэию]$/i.test(last)) changed = last;
+  }
+  parts[parts.length - 1] = changed;
+  return parts.join(' ');
+}
+function replyPreviewText(m) {
+  if (!m) return '';
+  if (m.media) return 'картинка' + (m.text ? ' · ' + m.text : '');
+  if (m.sticker) return 'стикер';
+  return m.text || '';
+}
+function setReply(m) {
+  if (!m || m.id == null) return;
+  store.replyTo = {
+    id: m.id,
+    author: m.author,
+    room: m.room,
+    text: m.text || '',
+    sticker: !!(m.sticker && m.sticker.url),
+    media: !!(m.media && m.media.url),
+  };
+  renderReplyBar();
+  const input = $('text');
+  if (input) input.focus();
+}
+function clearReply() {
+  store.replyTo = null;
+  renderReplyBar();
+}
+function renderReplyBar() {
+  const bar = $('replyBar');
+  if (!bar) return;
+  const m = store.replyTo;
+  bar.classList.toggle('hidden', !m);
+  if (!m) return;
+  const label = $('replyBarText');
+  if (label) label.textContent = 'Ответ ' + declineName(displayNameOf(m.author)) + ': ' + replyPreviewText(m);
+}
+
+/* --------------------------------------------------- переход к сообщению */
+function messageRowOf(id) {
+  const box = $('messages');
+  if (!box) return null;
+  return box.querySelector('.msg[data-id="' + String(id).replace(/"/g, '') + '"]');
+}
+function scrollToMessage(id) {
+  const row = messageRowOf(id);
+  if (!row) return false;
+  if (row.scrollIntoView) row.scrollIntoView({ block: 'center' });
+  row.classList.add('flash');
+  setTimeout(() => row.classList.remove('flash'), 1000);
+  return true;
+}
+function applyPendingScroll(room) {
+  const pending = store.pendingScroll;
+  if (!pending || pending.room !== room) return;
+  clearTimeout(store.pendingTimer);
+  store.pendingScroll = null;
+  if (!scrollToMessage(pending.id)) toast('Сообщение старше загруженной истории');
+}
+function jumpToMessage(room, id) {
+  if (!room || id == null) return;
+  if (room !== store.room) {
+    store.pendingScroll = { room, id };
+    openRoomByKey(room);
+    if (scrollToMessage(id)) store.pendingScroll = null;
+    clearTimeout(store.pendingTimer);
+    store.pendingTimer = setTimeout(() => {
+      if (store.pendingScroll && store.pendingScroll.id === id) {
+        store.pendingScroll = null;
+        toast('Сообщение старше загруженной истории');
+      }
+    }, 4000);
+    return;
+  }
+  if (!scrollToMessage(id)) toast('Сообщение старше загруженной истории');
+}
+function dmPeerOf(room) {
+  const parts = String(room || '').replace(/^dm:/, '').split('|');
+  const me = store.me ? String(store.me.name).toLowerCase() : '';
+  return parts.find((part) => part && part.toLowerCase() !== me) || parts[0] || '';
+}
+function openRoomByKey(room) {
+  if (String(room).indexOf('dm:') === 0) {
+    const peer = dmPeerOf(room);
+    openRoom(room, 'dm', '@ ' + displayNameOf(peer), peer);
+  } else {
+    openRoom(room, 'channel', '# ' + room);
+  }
+}
+
+/* --------------------------------------------------- лайтбокс */
+function openLightbox(url) {
+  const back = $('lightbox');
+  const img = $('lightboxImg');
+  if (!back || !img || !url) return;
+  img.src = netUrl(url);
+  back.classList.remove('hidden');
+}
+function hideLightbox() {
+  const back = $('lightbox');
+  if (back) back.classList.add('hidden');
+  const img = $('lightboxImg');
+  if (img) img.removeAttribute('src');
+}
+
+function renderFriends() {
+  const list = $('friendList');
+  const req = $('requests');
+  list.innerHTML = '';
+  req.innerHTML = '';
+
+  const incoming = store.friends.incoming || [];
+  const outgoing = store.friends.outgoing || [];
+  const friends = store.friends.friends || [];
+
+  if (incoming.length) {
+    const label = document.createElement('div');
+    label.className = 'side-label';
+    label.textContent = 'Заявки в друзья';
+    req.appendChild(label);
+  }
+  for (const person of incoming) {
+    const label = displayNameOf(person.name, person);
+    const row = document.createElement('div');
+    row.className = 'frow';
+    row.appendChild(avatar(person.name));
+    const nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.textContent = label;
+    nm.title = person.name;
+    row.appendChild(nm);
+    const ok = document.createElement('button');
+    ok.textContent = 'Принять';
+    ok.onclick = () => send({ t: 'friend_accept', name: person.name });
+    const no = document.createElement('button');
+    no.textContent = 'Отклонить';
+    no.onclick = () => send({ t: 'friend_remove', name: person.name });
+    row.append(ok, no);
+    req.appendChild(row);
+  }
+
+  const label = document.createElement('div');
+  label.className = 'side-label';
+  label.textContent = 'Друзья — ' + friends.length;
+  list.appendChild(label);
+
+  for (const person of friends) {
+    const shown = displayNameOf(person.name, person);
+    const row = document.createElement('div');
+    row.className = 'frow clickable';
+    row.title = 'Открыть профиль';
+    row.onclick = (event) => {
+      if (event.target.closest && event.target.closest('button')) return;
+      openUserCard(person.name);
+    };
+    row.appendChild(avatar(person.name));
+    const col = document.createElement('div');
+    col.className = 'nm';
+    const nm = document.createElement('div');
+    nm.textContent = shown;
+    nm.title = person.name;
+    const st = document.createElement('div');
+    st.className = 'st' + (isOnline(person.name) ? ' on' : '');
+    st.textContent = statusLabel(person.name, person.status);
+    if (isOnline(person.name)) st.style.color = statusColor(person.name);
+    col.append(nm, st);
+    row.appendChild(col);
+    const write = document.createElement('button');
+    write.textContent = 'Написать';
+    write.onclick = () => openRoom(
+      dmRoomOf(store.me.name, person.name),
+      'dm',
+      '@ ' + shown,
+      person.name
+    );
+    const del = document.createElement('button');
+    del.textContent = '✕';
+    del.title = 'Убрать из друзей';
+    del.onclick = () => send({ t: 'friend_remove', name: person.name });
+    row.append(write, del);
+    list.appendChild(row);
+  }
+  if (!friends.length && !incoming.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'Друзей пока нет. Введите имя друга выше — он получит заявку.';
+    list.appendChild(empty);
+  }
+  if (outgoing.length) {
+    const wait = document.createElement('div');
+    wait.className = 'empty';
+    wait.textContent = 'Ждём ответа: ' + outgoing.map((person) => person.displayName || person.name).join(', ');
+    list.appendChild(wait);
+  }
+}
+
+/* --------------------------------------------------- поиск людей (1.4.0) */
+let peopleTimer = null;
+function onPeopleInput() {
+  clearTimeout(peopleTimer);
+  const input = $('peopleQuery');
+  const q = String(input ? input.value : '').trim();
+  if (q.length < 2) {
+    store.people = null;
+    renderPeople();
+    return;
+  }
+  peopleTimer = setTimeout(() => send({ t: 'search_users', q }), 300);
+}
+function personOnline(person) {
+  return person.online === true || isOnline(person.name);
+}
+function personStatusLabel(person) {
+  if (!personOnline(person)) return 'не в сети';
+  return statusLabel(person.name, person.status);
+}
+// Кнопка действия в результатах поиска людей: друг / заявка отправлена / принять.
+function peopleActionButton(person) {
+  if (person.friend) {
+    const btn = el('button', '', 'Написать');
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      openRoom(dmRoomOf(store.me.name, person.name), 'dm', '@ ' + displayNameOf(person.name, person), person.name);
+    };
+    return btn;
+  }
+  if (person.pending === 'out') {
+    const btn = el('button', '', 'Заявка отправлена');
+    btn.disabled = true;
+    btn.title = 'Ждём ответа';
+    return btn;
+  }
+  const btn = el('button', '', person.pending === 'in' ? 'Принять заявку' : 'Добавить');
+  btn.onclick = (event) => {
+    event.stopPropagation();
+    send({ t: person.pending === 'in' ? 'friend_accept' : 'friend_add', name: person.name });
+  };
+  return btn;
+}
+function renderPeople() {
+  const box = $('peopleResults');
+  if (!box) return;
+  box.innerHTML = '';
+  const input = $('peopleQuery');
+  const q = String(input ? input.value : '').trim();
+  if (!q) return;
+  if (!store.people) {
+    box.appendChild(el('div', 'empty', 'Ищу людей…'));
+    return;
+  }
+  const me = store.me ? String(store.me.name).toLowerCase() : '';
+  const list = (store.people.results || []).filter((one) => one && String(one.name).toLowerCase() !== me);
+  if (!list.length) {
+    box.appendChild(el('div', 'empty', 'Никого не нашли — проверьте имя'));
+    return;
+  }
+  box.appendChild(el('div', 'side-label', 'Найденные люди'));
+  for (const person of list) {
+    const row = el('div', 'frow clickable');
+    row.title = 'Открыть профиль';
+    row.onclick = (event) => {
+      if (event.target.closest && event.target.closest('button')) return;
+      openUserCard(person.name);
+    };
+    row.appendChild(avatar(person.name));
+    const col = el('div', 'nm');
+    const nm = el('div', '', displayNameOf(person.name, person));
+    nm.title = person.name;
+    const st = el('div', 'st' + (personOnline(person) ? ' on' : ''), personStatusLabel(person));
+    if (personOnline(person)) st.style.color = statusColor(person.name, person.status);
+    col.append(nm, st);
+    row.appendChild(col);
+    row.appendChild(peopleActionButton(person));
+    box.appendChild(row);
+  }
+}
+if ($('peopleQuery')) $('peopleQuery').addEventListener('input', onPeopleInput);
+
+$('friendAdd').onclick = () => {
+  const name = $('friendName').value.trim();
+  if (!name) return;
+  send({ t: 'friend_add', name });
+  $('friendName').value = '';
+};
+$('friendName').onkeydown = (e) => { if (e.key === 'Enter') $('friendAdd').click(); };
+
+$('navFriends').onclick = () => {
+  $('friendsPane').classList.remove('hidden');
+  $('messages').classList.add('hidden');
+  $('composer').classList.add('hidden');
+  $('topTitle').textContent = 'Друзья';
+  $('navFriends').classList.add('active');
+  $('navChannels').classList.remove('active');
+  $('side').classList.remove('open');
+  closeSearchPanel();
+  clearReply();
+  $('searchBtn').classList.add('hidden');
+  renderFriends();
+  renderPeople();
+};
+$('navChannels').onclick = () => {
+  openRoom(store.room || 'obshiy', store.roomKind, store.roomTitle, store.roomPeer);
+  $('side').classList.add('open');
+  setTimeout(() => $('side').classList.remove('open'), 1800);
+};
+$('navInvite').onclick = async () => {
+  const link = SERVER || location.origin;
+  try {
+    await navigator.clipboard.writeText(link);
+    toast('Ссылка скопирована: ' + link);
+  } catch {
+    prompt('Скопируйте ссылку и отправьте другу:', link);
+  }
+};
+$('newChannel').onclick = async () => {
+  const name = await openDialog({
+    title: 'Новый чат',
+    text: 'Название латиницей, 2–24 символа: буквы, цифры, дефис, подчёркивание. Чат увидят все.',
+    input: true,
+    placeholder: 'games',
+    ok: 'Создать',
+  });
+  if (!name) return;
+  const clean = String(name).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
+  if (clean.length < 2) { toast('Название: латиница или цифры, от 2 символов'); return; }
+  send({ t: 'create', room: clean });
+};
+$('composer').onsubmit = (e) => {
+  e.preventDefault();
+  const input = $('text');
+  const text = input.value.trim();
+  if (!store.room) return;
+  if (!text) {
+    if (store.replyTo) toast('Напишите текст ответа');
+    return;
+  }
+  const payload = { t: 'msg', room: store.room, text };
+  if (store.replyTo && store.replyTo.id != null) payload.replyTo = store.replyTo.id;
+  send(payload);
+  clearReply();
+  stopTyping();
+  input.value = '';
+  scrollDown();
+};
+$('text').addEventListener('input', noteTyping);
+
+/* --------------------------------------------------- поиск по истории (1.4.0) */
+let searchTimer = null;
+function searchPanelOpen() {
+  const pane = $('searchPane');
+  return !!pane && !pane.classList.contains('hidden');
+}
+function openSearchPanel() {
+  const pane = $('searchPane');
+  if (!pane || !store.room) { toast('Сначала откройте чат'); return; }
+  pane.classList.remove('hidden');
+  renderSearchResults();
+  setTimeout(() => {
+    const input = $('searchQuery');
+    if (input) input.focus();
+  }, 40);
+}
+function closeSearchPanel() {
+  const pane = $('searchPane');
+  if (pane) pane.classList.add('hidden');
+}
+function searchQueryValue() {
+  const input = $('searchQuery');
+  return String(input ? input.value : '').trim();
+}
+function runSearch() {
+  const q = searchQueryValue();
+  if (q.length < 2) return;
+  store.searchQ = q;
+  store.searchHits = null;
+  store.searchLoading = true;
+  renderSearchResults();
+  send({ t: 'search_messages', q, room: store.room });
+}
+function onSearchInput() {
+  clearTimeout(searchTimer);
+  const q = searchQueryValue();
+  if (q.length < 2) {
+    store.searchHits = null;
+    store.searchLoading = false;
+    store.searchQ = q;
+    renderSearchResults();
+    return;
+  }
+  store.searchLoading = true;
+  renderSearchResults();
+  searchTimer = setTimeout(runSearch, 300);
+}
+function renderSearchResults() {
+  const box = $('searchResults');
+  if (!box) return;
+  box.innerHTML = '';
+  const q = searchQueryValue();
+  if (!q) {
+    box.appendChild(el('div', 'empty', 'Введите слово или фразу — поиск идёт по истории каналов и личных сообщений.'));
+    return;
+  }
+  if (q.length < 2) {
+    box.appendChild(el('div', 'empty', 'Введите хотя бы 2 символа.'));
+    return;
+  }
+  if (!store.searchHits || store.searchQ !== q) {
+    box.appendChild(el('div', 'empty', store.searchLoading ? 'Ищу…' : 'Введите запрос'));
+    return;
+  }
+  if (!store.searchHits.length) {
+    box.appendChild(el('div', 'empty', 'Ничего не нашлось'));
+    return;
+  }
+  for (const hit of store.searchHits) box.appendChild(searchHitNode(hit, q));
+}
+function roomLabelOf(room) {
+  if (String(room).indexOf('dm:') === 0) return '@ ' + displayNameOf(dmPeerOf(room));
+  return '# ' + room;
+}
+function appendHighlighted(parent, text, q) {
+  const source = String(text || '');
+  const needle = String(q || '').toLowerCase();
+  if (!needle) {
+    parent.textContent = source;
+    return;
+  }
+  const lower = source.toLowerCase();
+  let from = 0;
+  for (;;) {
+    const at = lower.indexOf(needle, from);
+    if (at < 0) break;
+    if (at > from) parent.appendChild(document.createTextNode(source.slice(from, at)));
+    const mark = document.createElement('mark');
+    mark.textContent = source.slice(at, at + needle.length);
+    parent.appendChild(mark);
+    from = at + needle.length;
+  }
+  if (from < source.length) parent.appendChild(document.createTextNode(source.slice(from)));
+}
+function searchHitNode(hit, q) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'hit';
+  const top = document.createElement('div');
+  top.className = 'hit-top';
+  top.appendChild(el('span', 'hit-who', displayNameOf(hit.author)));
+  top.appendChild(el('span', 'hit-room', roomLabelOf(hit.room)));
+  top.appendChild(el('span', 'hit-when', timeOf(hit.ts)));
+  const text = document.createElement('div');
+  text.className = 'hit-text';
+  appendHighlighted(text, hit.text, q);
+  btn.append(top, text);
+  btn.onclick = () => {
+    closeSearchPanel();
+    jumpToMessage(hit.room, hit.id);
+  };
+  return btn;
+}
+if ($('searchBtn')) $('searchBtn').onclick = () => { if (searchPanelOpen()) closeSearchPanel(); else openSearchPanel(); };
+if ($('searchClose')) $('searchClose').onclick = () => closeSearchPanel();
+if ($('searchQuery')) {
+  $('searchQuery').addEventListener('input', onSearchInput);
+  $('searchQuery').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    clearTimeout(searchTimer);
+    runSearch();
+  });
+  $('searchQuery').addEventListener('focus', () => { if (searchPanelOpen()) renderSearchResults(); });
+}
+
+/* ------------------------------------------------------------------ «печатает…» */
+const typers = new Map();
+let typingSentAt = 0;
+
+function clearTypers() {
+  for (const item of typers.values()) clearTimeout(item.timer);
+  typers.clear();
+  renderTyping();
+}
+
+function handleTyping(data) {
+  if (!store.me || !S().showTyping || !data) return;
+  if (data.name === store.me.name) return;
+  if (data.room !== store.room) return;
+  const key = String(data.name).toLowerCase();
+  const old = typers.get(key);
+  if (old) clearTimeout(old.timer);
+  if (data.stopped) {
+    typers.delete(key);
+    renderTyping();
+    return;
+  }
+  const timer = setTimeout(() => {
+    typers.delete(key);
+    renderTyping();
+  }, 4200);
+  typers.set(key, { name: data.displayName || data.name, timer });
+  renderTyping();
+}
+
+function renderTyping() {
+  const box = $('typing');
+  if (!box) return;
+  const names = [...typers.values()].map((item) => item.name);
+  box.textContent = names.length
+    ? (names.length === 1 ? names[0] + ' печатает…' : names.join(', ') + ' печатают…')
+    : '';
+  box.classList.toggle('on', names.length > 0);
+}
+
+// Отправляем «печатает» не чаще раза в 2,5 с и гасим через 3 с простоя.
+function noteTyping() {
+  if (!store.room || !S().showTyping) return;
+  if (!store.ws || store.ws.readyState !== 1) return;
+  const room = store.room;
+  const stamp = Date.now();
+  if (stamp - typingSentAt > 2500) {
+    typingSentAt = stamp;
+    send({ t: 'typing', room });
+  }
+  clearTimeout(noteTyping._t);
+  noteTyping._t = setTimeout(() => {
+    typingSentAt = 0;
+    if (store.ws && store.ws.readyState === 1) send({ t: 'typing', room, stopped: true });
+  }, 3000);
+}
+
+function stopTyping() {
+  clearTimeout(noteTyping._t);
+  typingSentAt = 0;
+  if (store.room && store.ws && store.ws.readyState === 1) {
+    send({ t: 'typing', room: store.room, stopped: true });
+  }
+}
+
+/* ------------------------------------------------------------------ голосовой чат */
+async function ensureMic() {
+  if (store.localStream) return store.localStream;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('браузер не даёт доступ к микрофону — нужен адрес https://');
+  }
+  const s = store.settings || {};
+  const audio = {
+    echoCancellation: s.echoCancel !== false,
+    noiseSuppression: s.noiseSuppress !== false,
+    autoGainControl: s.autoGain !== false,
+  };
+  if (s.voiceInput) audio.deviceId = { exact: s.voiceInput };
+  store.localStream = await navigator.mediaDevices.getUserMedia({ audio });
+  return store.localStream;
+}
+
+async function joinVoice(room) {
+  if (!window.RTCPeerConnection) { toast('Браузер не поддерживает голосовой чат'); return; }
+  try {
+    await ensureMic();
+  } catch (error) {
+    toast('Микрофон недоступен: ' + error.message);
+    return;
+  }
+  if (store.voiceRoom && store.voiceRoom !== room) leaveVoice(true);
+  for (const name of [...store.peers.keys()]) closePeer(name);
+  store.muted = false;
+  store.voiceRoom = room;
+  store.voiceUsers = [{ name: store.me.name, muted: false }];
+  renderVoiceBox();
+  send({ t: 'voice_join', room });
+  toast('Вы в голосовом канале ' + room);
+}
+
+function leaveVoice(silent) {
+  if (!store.voiceRoom) return;
+  // Показ экрана не должен жить после выхода из канала.
+  if (store.screenOn || store.screenStream) stopScreen(true);
+  send({ t: 'voice_leave' });
+  for (const name of [...store.peers.keys()]) closePeer(name);
+  store.voiceRoom = null;
+  store.voiceUsers = [];
+  store.screenSender = '';
+  if (store.localStream) {
+    store.localStream.getTracks().forEach((track) => track.stop());
+    store.localStream = null;
+  }
+  hideCall();
+  renderVoiceBox();
+  renderChannels();
+  if (!silent) toast('Вы вышли из голосового канала');
+}
+
+function renderVoiceBox() {
+  const box = $('voiceBox');
+  if (!store.voiceRoom) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+  $('voiceHead').textContent = 'Голос: ' + store.voiceRoom;
+  const list = $('voiceUsers');
+  list.innerHTML = '';
+  for (const user of store.voiceUsers) {
+    const row = document.createElement('div');
+    row.className = 'vuser';
+    const dot = document.createElement('span');
+    dot.className = 'vdot';
+    dot.style.background = user.muted ? 'var(--danger)' : 'var(--ok)';
+    row.appendChild(dot);
+    const name = document.createElement('span');
+    name.textContent = user.name + (store.me && user.name === store.me.name ? ' (вы)' : '') + (user.muted ? ' 🔇' : '') + (user.screen ? ' 🖥' : '');
+    row.appendChild(name);
+    list.appendChild(row);
+  }
+  const mic = $('micBtn');
+  mic.classList.toggle('on', store.muted);
+  mic.textContent = store.muted ? '🔇 Включить' : '🎤 Микрофон';
+}
+
+function handleVoiceState(data) {
+  const users = data.users || [];
+  if (data.limit) store.voiceLimit = Number(data.limit) || store.voiceLimit;
+  const inRoom = store.me && users.some((u) => u.name === store.me.name);
+  if (inRoom) {
+    store.voiceRoom = data.room;
+    store.voiceUsers = users;
+    syncPeers(users);
+    renderVoiceBox();
+    renderCall();
+    updateScreenBtn();
+  } else if (store.voiceRoom === data.room) {
+    store.voiceUsers = users;
+    syncPeers(users);
+    renderVoiceBox();
+    renderCall();
+    // сервер не видит нас в канале, хотя мы считаем, что мы в нём — заходим заново
+    if (!inRoom) {
+      const now = Date.now();
+      if (!store.voiceResyncAt || now - store.voiceResyncAt > 3000) {
+        store.voiceResyncAt = now;
+        store.voiceResyncTries = (store.voiceResyncTries || 0) + 1;
+        if (store.voiceResyncTries <= 5) {
+          send({ t: 'voice_join', room: data.room });
+        } else {
+          store.voiceResyncTries = 0;
+          leaveVoice(true);
+          toast('Связь с голосовым каналом потерялась — зайдите в него снова');
+        }
+      }
+    } else {
+      store.voiceResyncTries = 0;
+    }
+  } else if (!store.voiceRoom && !data.room) {
+    store.voiceUsers = [];
+    renderCall();
+  }
+}
+
+function syncPeers(users) {
+  const others = users.map((u) => u.name).filter((n) => n !== store.me.name);
+  const present = new Set(others);
+  for (const name of [...store.peers.keys()]) {
+    if (!present.has(name)) closePeer(name);
+  }
+  for (const name of others) {
+    if (store.peers.has(name)) continue;
+    const peer = createPeer(name);
+    if (store.me.name < name) negotiate(peer);
+  }
+}
+
+// ICE-серверы: базовые STUN плюс TURN. Без TURN звонок не поднимется
+// в мобильной сети и за строгим NAT. Свой TURN задаётся в настройках.
+function rtcIceServers() {
+  const s = S();
+  const list = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+  const custom = String(s.turnUrl || '').trim();
+  if (custom) {
+    const urls = custom.split(',').map((u) => u.trim()).filter(Boolean);
+    if (urls.length) {
+      list.push({ urls, username: String(s.turnUser || ''), credential: String(s.turnPass || '') });
+    }
+    return list;
+  }
+  list.push({
+    urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  });
+  return list;
+}
+
+function createPeer(name) {
+  const pc = new RTCPeerConnection({ iceServers: rtcIceServers(), bundlePolicy: 'max-bundle' });
+  const peer = { pc, name, pending: [], audio: null, audios: [], screenStream: null, makingOffer: false, ignoreOffer: false };
+  store.peers.set(name, peer);
+  pc.onnegotiationneeded = () => { negotiate(peer); };
+
+  const src = micOutStream() || store.localStream;
+  if (src) {
+    src.getTracks().forEach((track) => pc.addTrack(track, src));
+  }
+  // Если уже показываю экран — новому участнику трек сразу в оффер.
+  if (store.screenOn && store.screenStream) {
+    store.screenStream.getVideoTracks().forEach((track) => pc.addTrack(track, store.screenStream));
+  }
+  pc.onicecandidate = (event) => {
+    if (!event.candidate) return;
+    const candidate = event.candidate.toJSON ? event.candidate.toJSON() : event.candidate;
+    send({ t: 'rtc', to: name, kind: 'ice', payload: candidate });
+  };
+  pc.ontrack = (event) => {
+    if (event.track.kind === 'video') {
+      peer.screenStream = event.streams[0] || new MediaStream([event.track]);
+      event.track.onmute = () => { peer.screenStream = null; renderCall(); };
+      event.track.onended = () => { peer.screenStream = null; renderCall(); };
+      renderCall();
+      return;
+    }
+    // Голос — первый звук, второй звук — это звук экрана, его тоже играем.
+    const audio = document.createElement('audio');
+    audio.autoplay = true;
+    audio.srcObject = event.streams[0];
+    audio.volume = remoteVolume();
+    applySink(audio);
+    document.body.appendChild(audio);
+    audio.play().catch(() => {});
+    peer.audios.push(audio);
+    if (!peer.audio) peer.audio = audio;
+  };
+  return peer;
+}
+
+function closePeer(name) {
+  const peer = store.peers.get(name);
+  if (!peer) return;
+  try { peer.pc.close(); } catch {}
+  for (const audio of peer.audios || []) {
+    try { audio.pause(); audio.srcObject = null; audio.remove(); } catch (error) {}
+  }
+  peer.audios = [];
+  peer.audio = null;
+  store.peers.delete(name);
+}
+
+// Perfect negotiation: обе стороны могут одновременно предложить
+// пересогласование (например, когда один включает экран). Тогда «вежливая»
+// сторона откатывает свой offer, а не ломает соединение.
+async function negotiate(peer) {
+  if (!peer || peer.pc.signalingState !== 'stable' || peer.makingOffer) return;
+  peer.makingOffer = true;
+  try {
+    const offer = await peer.pc.createOffer();
+    if (peer.pc.signalingState !== 'stable') return;
+    await peer.pc.setLocalDescription(offer);
+    send({ t: 'rtc', to: peer.name, kind: 'offer', payload: { type: 'offer', sdp: peer.pc.localDescription.sdp } });
+  } catch (error) {
+    console.warn('offer', error);
+  } finally {
+    peer.makingOffer = false;
+  }
+}
+
+async function flushCandidates(peer) {
+  while (peer.pending.length) {
+    const candidate = peer.pending.shift();
+    try { await peer.pc.addIceCandidate(candidate); } catch {}
+  }
+}
+
+async function handleRtc(data) {
+  const name = data.from;
+  if (!name) return;
+  try {
+    if (data.kind === 'offer') {
+      let peer = store.peers.get(name);
+      if (!peer) peer = createPeer(name);
+      const polite = String(store.me && store.me.name) > name;
+      const collision = peer.makingOffer || peer.pc.signalingState !== 'stable';
+      peer.ignoreOffer = !polite && collision;
+      if (peer.ignoreOffer) return;
+      if (collision) {
+        try { await peer.pc.setLocalDescription({ type: 'rollback' }); } catch (error) {}
+      }
+      await peer.pc.setRemoteDescription(new RTCSessionDescription(data.payload));
+      await flushCandidates(peer);
+      const answer = await peer.pc.createAnswer();
+      await peer.pc.setLocalDescription(answer);
+      send({ t: 'rtc', to: name, kind: 'answer', payload: { type: 'answer', sdp: peer.pc.localDescription.sdp } });
+    } else if (data.kind === 'answer') {
+      const peer = store.peers.get(name);
+      if (!peer) return;
+      await peer.pc.setRemoteDescription(new RTCSessionDescription(data.payload));
+      await flushCandidates(peer);
+    } else if (data.kind === 'renego') {
+      // Сигнал только для старых клиентов: пересогласование теперь идёт
+      // само через onnegotiationneeded, второй offer здесь не нужен.
+      const peer = store.peers.get(name);
+      if (peer && peer.pc.signalingState === 'stable' && !peer.pc.getTransceivers().some((t) => t.currentDirection)) {
+        await negotiate(peer);
+      }
+    } else if (data.kind === 'ice') {
+      const peer = store.peers.get(name);
+      if (!peer) return;
+      if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(data.payload);
+      else peer.pending.push(data.payload);
+    }
+  } catch (error) {
+    console.warn('rtc', error);
+  }
+}
+
+$('micBtn').onclick = () => {
+  const track = store.localStream && store.localStream.getAudioTracks()[0];
+  store.muted = !store.muted;
+  if (track) track.enabled = !store.muted;
+  send({ t: 'voice_mute', muted: store.muted });
+  renderVoiceBox();
+};
+$('leaveVoice').onclick = () => leaveVoice();
+
+window.addEventListener('beforeunload', () => {
+  if (store.voiceRoom) send({ t: 'voice_leave' });
+});
+
+// Вернулись на вкладку — текущий чат считается прочитанным.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !store.room) return;
+  if (store.unread && store.unread[store.room]) {
+    delete store.unread[store.room];
+    updateTitle();
+    renderChannels();
+  }
+});
+
+/* ------------------------------------------------------------------ настройки, профиль, приложение */
+const SETTINGS_KEY = 'messenger.settings';
+const AVATAR_SET = ['', '😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🚀', '🔥', '⭐', '🎧', '🎮', '💻', '🌙', '⚡', '🍀', '🎯', '👑', '💬'];
+const THEME_LIST = [['dark', 'Тёмная'], ['light', 'Светлая'], ['midnight', 'Полночь']];
+const STATUS_LIST = [['online', 'В сети'], ['idle', 'Не активен'], ['dnd', 'Не беспокоить'], ['invisible', 'Невидимка']];
+const TONE_LIST = [['chime', 'Колокольчик'], ['pop', 'Хлопок'], ['blip', 'Сигнал']];
+const ACCENTS = ['#5865f2', '#3ba55d', '#faa61a', '#eb459e', '#ed4245', '#00a8fc', '#9b59b6'];
+let currentTab = 'profile';
+let micCtx = null, micGainNode = null, micDest = null;
+let soundCtx = null;
+let saveTimer = null;
+let updateUnsub = null;
+
+function settingsDefaults() {
+  return {
+    theme: 'dark', fontScale: 100, compact: false, showTime: true, showTyping: true,
+    notifySound: true, notifyDesktop: true, notifyAll: true,
+    soundVolume: 60, notifyTone: 'chime', dnd: false,
+    dmPrivacy: 'all', status: 'online',
+    voiceInput: '', voiceOutput: '', voiceVolume: 100, micGain: 100,
+    noiseSuppress: true, echoCancel: true, autoGain: true,
+    turnUrl: '', turnUser: '', turnPass: '',
+  };
+}
+function S() {
+  if (!store.settings) store.settings = settingsDefaults();
+  return store.settings;
+}
+function remoteVolume() {
+  const v = Number(S().voiceVolume);
+  return Math.max(0, Math.min(200, isNaN(v) ? 100 : v)) / 100;
+}
+function applySink(audio) {
+  const out = S().voiceOutput;
+  if (!out || !audio || typeof audio.setSinkId !== 'function') return;
+  try { audio.setSinkId(out).catch(() => {}); } catch (error) {}
+}
+function micOutStream() {
+  if (!store.localStream) return null;
+  const gain = Math.max(0, Math.min(200, Number(S().micGain) || 100)) / 100;
+  if (Math.abs(gain - 1) < 0.01) return store.localStream;
+  try {
+    if (!micCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      micCtx = new Ctx();
+      const source = micCtx.createMediaStreamSource(store.localStream);
+      micGainNode = micCtx.createGain();
+      micDest = micCtx.createMediaStreamDestination();
+      source.connect(micGainNode).connect(micDest);
+    }
+    if (micCtx.state === 'suspended') micCtx.resume();
+    micGainNode.gain.value = gain;
+    return micDest.stream;
+  } catch (error) {
+    return store.localStream;
+  }
+}
+function applySettings(next) {
+  store.settings = Object.assign(settingsDefaults(), store.settings || {}, next || {});
+  const s = store.settings;
+  const theme = THEME_LIST.some((t) => t[0] === s.theme) ? s.theme : 'dark';
+  document.documentElement.dataset.theme = theme;
+  const scale = Math.max(85, Math.min(130, Number(s.fontScale) || 100));
+  document.body.style.zoom = String(scale / 100);
+  document.body.classList.toggle('compact', !!s.compact);
+  document.body.classList.toggle('hide-time', s.showTime === false);
+  if (s.showTyping === false) clearTypers();
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'light' ? '#ffffff' : theme === 'midnight' ? '#06070b' : '#5865f2');
+  if (micGainNode) micGainNode.gain.value = Math.max(0, Math.min(2, (Number(s.micGain) || 100) / 100));
+  for (const peer of store.peers.values()) {
+    if (!peer.audio) continue;
+    peer.audio.volume = remoteVolume();
+    applySink(peer.audio);
+  }
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (error) {}
+}
+function saveSettings(patch) {
+  applySettings(patch);
+  if (!store.ws || store.ws.readyState !== 1) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => send({ t: 'settings_update', settings: patch }), 300);
+}
+function myProfile() {
+  const p = store.profile || {};
+  const base = store.me || {};
+  return {
+    displayName: p.displayName || base.name || '',
+    avatar: p.avatar || '',
+    avatarUrl: p.avatarUrl || avatarUrlOf(base.name),
+    accent: p.accent || base.color || '#5865f2',
+    bio: p.bio || '',
+  };
+}
+function renderMe() {
+  const ava = $('meAva');
+  if (!ava || !store.me) return;
+  const p = myProfile();
+  const myUrl = p.avatarUrl || avatarUrlOf(store.me.name);
+  ava.innerHTML = '';
+  if (myUrl) {
+    const img = document.createElement('img');
+    img.src = netUrl(myUrl);
+    img.alt = '';
+    ava.appendChild(img);
+    ava.style.fontSize = '';
+    ava.style.background = 'var(--panel2)';
+  } else {
+    ava.textContent = p.avatar || initials(p.displayName || store.me.name);
+    ava.style.fontSize = p.avatar ? '22px' : '';
+    ava.style.background = p.avatar ? 'var(--panel2)' : (p.accent || colorOf(store.me.name));
+  }
+  ava.title = p.displayName + (store.me.name && p.displayName !== store.me.name ? ' (' + store.me.name + ')' : '');
+}
+function tonePlay() {
+  const s = S();
+  if (s.notifySound === false || s.dnd) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    soundCtx = soundCtx || new Ctx();
+    if (soundCtx.state === 'suspended') soundCtx.resume();
+    const pair = { chime: [880, 1320], pop: [420, 700], blip: [660, 660] }[s.notifyTone] || [880, 1320];
+    const now = soundCtx.currentTime;
+    const vol = Math.max(0, Math.min(100, Number(s.soundVolume) || 60)) / 100 * 0.25;
+    const osc = soundCtx.createOscillator();
+    const gain = soundCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(pair[0], now);
+    osc.frequency.exponentialRampToValueAtTime(pair[1], now + 0.12);
+    gain.gain.setValueAtTime(vol > 0 ? vol : 0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+    osc.connect(gain).connect(soundCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.32);
+  } catch (error) {}
+}
+function notifyMessage(data) {
+  // Сервер присылает автора в поле author (раньше здесь проверялось from,
+  // из-за чего уведомления не работали вообще).
+  const author = data && (data.author || data.from);
+  if (!author || !store.me || author === store.me.name) return;
+  const s = S();
+  const focused = document.visibilityState === 'visible' && document.hasFocus();
+  if (focused && data.room === store.room && roomIsVisible(data.room)) return;
+  const isDm = String(data.room || '').indexOf('dm:') === 0;
+  const haystack = String(data.text || '').toLowerCase();
+  const mention = '@' + String(store.me.name).toLowerCase();
+  const displayMention = '@' + String(displayNameOf(store.me.name)).toLowerCase();
+  if (s.notifyAll === false && !isDm && haystack.indexOf(mention) < 0 && haystack.indexOf(displayMention) < 0) return;
+  tonePlay();
+  // Окно и так на виду: хватает звука, счётчика и заголовка вкладки.
+  // Всплывающее окно системы поверх мессенджера только мешает.
+  if (focused) return;
+  if (s.notifyDesktop === false || s.dnd) return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const title = displayNameOf(author, data.authorProfile);
+  const body = data.sticker && !data.text ? '[стикер]' : String(data.text || '').slice(0, 140);
+  try {
+    const n = new Notification(title, {
+      body,
+      icon: '/icon-192.png',
+      tag: 'msg-' + (data.room || ''),
+    });
+    n.onclick = () => window.focus();
+  } catch (error) {}
+}
+// Разрешение на системные уведомления просим один раз и только если оно
+// действительно нужно: иначе браузер молча блокирует всплывашки навсегда.
+let notifyAsked = false;
+function askNotifyPermission() {
+  if (notifyAsked) return;
+  notifyAsked = true;
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'default') return;
+  if (S().notifyDesktop === false) return;
+  try {
+    const res = Notification.requestPermission(() => {});
+    if (res && typeof res.then === 'function') res.catch(() => {});
+  } catch (error) {}
+}
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+async function installApp() {
+  const prompt = store.installPrompt;
+  if (!prompt) {
+    toast(isStandalone() ? 'Приложение уже установлено' : 'Откройте меню браузера → «Установить приложение»');
+    return;
+  }
+  try {
+    prompt.prompt();
+    const choice = await prompt.userChoice;
+    if (choice && choice.outcome === 'accepted') { store.installPrompt = null; toast('Устанавливаю приложение…'); }
+  } catch (error) {}
+}
+
+/* ------------------------------------------------ отрисовка окна настроек */
+function settingsOpen() {
+  const m = $('settingsModal');
+  return !!m && !m.classList.contains('hidden');
+}
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+function mkRow(label, hint) {
+  const row = el('div', 'field');
+  const lbl = el('div', 'lbl');
+  lbl.appendChild(document.createTextNode(label));
+  if (hint) lbl.appendChild(el('small', '', hint));
+  row.appendChild(lbl);
+  return row;
+}
+function addSwitch(parent, label, hint, value, onToggle) {
+  const row = mkRow(label, hint);
+  const btn = el('button', 'switch' + (value ? ' on' : ''));
+  btn.type = 'button';
+  btn.onclick = () => {
+    const next = !btn.classList.contains('on');
+    btn.classList.toggle('on', next);
+    onToggle(next);
+  };
+  row.appendChild(btn);
+  parent.appendChild(row);
+  return btn;
+}
+function addSelect(parent, label, hint, options, value, onChange) {
+  const row = mkRow(label, hint);
+  const sel = document.createElement('select');
+  options.forEach((pair) => {
+    const opt = document.createElement('option');
+    opt.value = pair[0];
+    opt.textContent = pair[1];
+    if (pair[0] === value) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  sel.onchange = () => onChange(sel.value);
+  row.appendChild(sel);
+  parent.appendChild(row);
+  return sel;
+}
+function addChips(parent, label, hint, options, value, onChange) {
+  const row = mkRow(label, hint);
+  const box = el('div', 'chips');
+  options.forEach((pair) => {
+    const chip = el('button', 'chip' + (pair[0] === value ? ' active' : ''), pair[1]);
+    chip.type = 'button';
+    chip.onclick = () => {
+      box.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      onChange(pair[0]);
+    };
+    box.appendChild(chip);
+  });
+  row.appendChild(box);
+  parent.appendChild(row);
+  return box;
+}
+function addRange(parent, label, hint, min, max, step, value, suffix, onInput) {
+  const row = mkRow(label, hint);
+  const box = el('div', 'range');
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(value);
+  const readout = el('span', 'range-val', value + suffix);
+  input.oninput = () => {
+    readout.textContent = input.value + suffix;
+    onInput(Number(input.value));
+  };
+  box.appendChild(input);
+  box.appendChild(readout);
+  row.appendChild(box);
+  parent.appendChild(row);
+  return input;
+}
+function headBlock(title, sub) {
+  const wrap = document.createDocumentFragment();
+  wrap.appendChild(el('h2', '', title));
+  wrap.appendChild(el('div', 'sub', sub));
+  return wrap;
+}
+
+function tabProfile(body) {
+  const p = myProfile();
+  const draft = Object.assign({}, p);
+  body.appendChild(headBlock('Мой профиль', 'Так вас видят другие в каналах, личных сообщениях и голосовом чате.'));
+
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Аватар'));
+  const row = el('div', 'field');
+  const preview = el('div', 'avatar-preview', p.avatar || initials(p.displayName || 'я'));
+  preview.style.background = p.avatar ? 'var(--panel2)' : p.accent;
+  row.appendChild(preview);
+  const set = el('div', 'avatar-set');
+  AVATAR_SET.forEach((ico) => {
+    const btn = el('button', ico === p.avatar ? 'active' : '', ico || 'АБ');
+    btn.type = 'button';
+    btn.title = ico ? 'Значок ' + ico : 'Первые буквы имени';
+    btn.onclick = () => {
+      set.querySelectorAll('button').forEach((x) => x.classList.remove('active'));
+      btn.classList.add('active');
+      draft.avatar = ico;
+      preview.textContent = ico || initials(draft.displayName || 'я');
+      preview.style.background = ico ? 'var(--panel2)' : draft.accent;
+    };
+    set.appendChild(btn);
+  });
+  row.appendChild(set);
+  sect.appendChild(row);
+
+  const uploadRow = el('div', 'field');
+  uploadRow.appendChild(el('div', 'lbl', 'Своя картинка'));
+  const upBtns = el('div', 'avatar-set');
+  const pick = document.createElement('input');
+  pick.type = 'file';
+  pick.accept = 'image/png,image/jpeg,image/webp,image/gif';
+  pick.style.display = 'none';
+  pick.onchange = () => { const f = pick.files && pick.files[0]; pick.value = ''; pickAvatar(f); };
+  const pickBtn = el('button', '', 'Загрузить фото');
+  pickBtn.type = 'button';
+  pickBtn.style.width = 'auto';
+  pickBtn.style.padding = '0 14px';
+  pickBtn.onclick = () => pick.click();
+  upBtns.appendChild(pickBtn);
+  if (p.avatarUrl) {
+    const delImg = el('button', '', 'Убрать фото');
+    delImg.type = 'button';
+    delImg.style.width = 'auto';
+    delImg.style.padding = '0 14px';
+    delImg.onclick = () => removeAvatar();
+    upBtns.appendChild(delImg);
+  }
+  upBtns.appendChild(pick);
+  uploadRow.appendChild(upBtns);
+  sect.appendChild(uploadRow);
+  if (p.avatarUrl) {
+    sect.appendChild(el('p', 'install-note', 'Сейчас стоит загруженное фото — оно показывается вместо значка. Сброс в набор значков — кнопкой «Убрать фото».'));
+  }
+  body.appendChild(sect);
+
+  const sect2 = el('div', 'sect');
+  sect2.appendChild(el('h4', '', 'Имя и описание'));
+  const nameRow = mkRow('Отображаемое имя', 'Видят другие участники (до 32 символов)');
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.maxLength = 32;
+  nameInput.value = p.displayName;
+  nameInput.oninput = () => {
+    draft.displayName = nameInput.value;
+    if (!draft.avatar) preview.textContent = initials(nameInput.value || 'я');
+  };
+  nameRow.appendChild(nameInput);
+  sect2.appendChild(nameRow);
+
+  const bioRow = mkRow('О себе', 'Короткая строка о вас (до 190 символов)');
+  const bioInput = document.createElement('textarea');
+  bioInput.maxLength = 190;
+  bioInput.value = p.bio;
+  bioInput.oninput = () => { draft.bio = bioInput.value; };
+  bioRow.appendChild(bioInput);
+  sect2.appendChild(bioRow);
+
+  const colorRow = mkRow('Цвет профиля', 'Рамка аватарки и акценты');
+  const swatches = el('div', 'chips');
+  ACCENTS.forEach((color) => {
+    const sw = el('button', 'swatch' + (color.toLowerCase() === String(p.accent).toLowerCase() ? ' active' : ''));
+    sw.type = 'button';
+    sw.style.background = color;
+    sw.onclick = () => {
+      swatches.querySelectorAll('.swatch').forEach((x) => x.classList.remove('active'));
+      sw.classList.add('active');
+      draft.accent = color;
+      preview.style.background = draft.avatar ? 'var(--panel2)' : color;
+    };
+    swatches.appendChild(sw);
+  });
+  colorRow.appendChild(swatches);
+  sect2.appendChild(colorRow);
+  body.appendChild(sect2);
+
+  const actions = el('div', 'field');
+  const save = el('button', 'primary', 'Сохранить профиль');
+  save.onclick = () => {
+    if (!draft.displayName || !draft.displayName.trim()) { toast('Имя не может быть пустым'); return; }
+    draft.displayName = draft.displayName.trim();
+    store.profile = Object.assign({}, store.profile, draft);
+    send({ t: 'profile_update', profile: draft });
+    renderMe();
+  };
+  actions.appendChild(save);
+  body.appendChild(actions);
+}
+
+function tabAppearance(body) {
+  const s = S();
+  body.appendChild(headBlock('Внешний вид', 'Тема, масштаб и плотность сообщений.'));
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Тема'));
+  addChips(sect, 'Оформление', 'Применяется сразу', THEME_LIST, s.theme, (v) => saveSettings({ theme: v }));
+  body.appendChild(sect);
+
+  const sect2 = el('div', 'sect');
+  sect2.appendChild(el('h4', '', 'Сообщения'));
+  addRange(sect2, 'Масштаб интерфейса', 'Размер текста и элементов', 85, 130, 5, s.fontScale, '%', (v) => saveSettings({ fontScale: v }));
+  addSwitch(sect2, 'Компактный режим', 'Меньше отступов между сообщениями', s.compact, (v) => saveSettings({ compact: v }));
+  addSwitch(sect2, 'Показывать время', 'Рядом с именем автора сообщения', s.showTime !== false, (v) => saveSettings({ showTime: v }));
+  addSwitch(sect2, 'Показывать «печатает…»', 'Видно, когда собеседник набирает текст', s.showTyping !== false, (v) => saveSettings({ showTyping: v }));
+  body.appendChild(sect2);
+}
+
+function tabNotify(body) {
+  const s = S();
+  body.appendChild(headBlock('Уведомления', 'Звук и всплывающие сообщения о новых письмах в чате.'));
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Режим'));
+  addSwitch(sect, 'Не беспокоить', 'Отключает все звуки и всплывающие уведомления', s.dnd, (v) => saveSettings({ dnd: v }));
+  addSwitch(sect, 'Обо всех сообщениях', 'Выключите — будут только личные сообщения и @упоминания', s.notifyAll !== false, (v) => saveSettings({ notifyAll: v }));
+  body.appendChild(sect);
+
+  const sect2 = el('div', 'sect');
+  sect2.appendChild(el('h4', '', 'Звук'));
+  addSwitch(sect2, 'Звук уведомления', 'Короткий сигнал при новом сообщении', s.notifySound !== false, (v) => saveSettings({ notifySound: v }));
+  addSelect(sect2, 'Сигнал', 'Кликните «Проверить», чтобы послушать', TONE_LIST, s.notifyTone, (v) => { saveSettings({ notifyTone: v }); tonePlay(); });
+  addRange(sect2, 'Громкость сигнала', '0 — без звука', 0, 100, 5, s.soundVolume, '%', (v) => saveSettings({ soundVolume: v }));
+  body.appendChild(sect2);
+
+  const sect3 = el('div', 'sect');
+  sect3.appendChild(el('h4', '', 'На компьютере'));
+  addSwitch(sect3, 'Всплывающие уведомления', 'Показывать, когда окно свёрнуто или не в фокусе', s.notifyDesktop, (v) => {
+    saveSettings({ notifyDesktop: v });
+    if (v && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(() => { if (settingsOpen()) renderSettings('notify'); });
+    }
+  });
+  if ('Notification' in window && Notification.permission !== 'granted') {
+    const row = mkRow('Разрешение браузера', 'Без него всплывающие уведомления не появятся');
+    const btn = el('button', '', Notification.permission === 'denied' ? 'Заблокировано' : 'Разрешить');
+    btn.onclick = () => {
+      if (Notification.permission === 'denied') { toast('Разрешите уведомления в настройках сайта в браузере'); return; }
+      Notification.requestPermission().then(() => renderSettings('notify'));
+    };
+    row.appendChild(btn);
+    sect3.appendChild(row);
+  }
+  body.appendChild(sect3);
+
+  // Web Push: уведомление приходит, даже когда приложение закрыто.
+  const sect4 = el('div', 'sect');
+  sect4.appendChild(el('h4', '', 'При закрытом приложении'));
+  if (!pushSupported()) {
+    sect4.appendChild(el('p', 'hint', 'Этот браузер не умеет фоновые уведомления — они будут приходить, только когда вкладка открыта.'));
+  } else {
+    addSwitch(sect4, 'Фоновые уведомления', 'Приходят, даже когда мессенджер закрыт. Работает на телефоне и в установленном приложении.', pushEnabledPref(), (v) => {
+      localStorage.setItem(PUSH_FLAG, v ? '1' : '0');
+      if (v) {
+        if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission().then(() => {
+            subscribePush();
+            if (settingsOpen()) renderSettings('notify');
+          });
+        } else {
+          subscribePush();
+        }
+      } else {
+        unsubscribePush();
+      }
+    });
+    if ('Notification' in window && Notification.permission === 'denied') {
+      sect4.appendChild(el('p', 'hint', 'Уведомления запрещены в настройках сайта — разрешите их в браузере, чтобы включить фоновые.'));
+    }
+  }
+  body.appendChild(sect4);
+}
+
+function tabPrivacy(body) {
+  const s = S();
+  body.appendChild(headBlock('Приватность', 'Кто может писать вам и как вас видят.'));
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Личные сообщения'));
+  addChips(sect, 'Кто может писать', 'Ограничение для новых людей', [['all', 'Все'], ['friends', 'Только друзья']], s.dmPrivacy, (v) => saveSettings({ dmPrivacy: v }));
+  body.appendChild(sect);
+
+  const sect2 = el('div', 'sect');
+  sect2.appendChild(el('h4', '', 'Статус'));
+  addSelect(sect2, 'Мой статус', 'Соседи по каналу видят вас в списке', STATUS_LIST, s.status, (v) => saveSettings({ status: v }));
+  body.appendChild(sect2);
+}
+
+function tabStickers(body) {
+  body.appendChild(headBlock('Стикеры и эмодзи', 'Набор стикеров общий для всех в Arc: до 80 картинок, каждая до 256 КБ.'));
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Набор стикеров'));
+  const addRow = el('div', 'field');
+  addRow.appendChild(el('div', 'lbl', 'Добавить стикер'));
+  const file = document.createElement('input');
+  file.type = 'file';
+  file.accept = 'image/png,image/jpeg,image/webp,image/gif';
+  file.multiple = true;
+  file.style.display = 'none';
+  file.onchange = () => {
+    const files = [...(file.files || [])];
+    file.value = '';
+    files.forEach((one) => addSticker(one));
+  };
+  const btn = el('button', 'pill', 'Загрузить картинки');
+  btn.type = 'button';
+  btn.style.width = 'auto';
+  btn.style.padding = '0 16px';
+  btn.onclick = () => file.click();
+  addRow.appendChild(btn);
+  addRow.appendChild(file);
+  sect.appendChild(addRow);
+  body.appendChild(sect);
+
+  const gridBox = el('div', 'sect');
+  const items = store.stickers || [];
+  gridBox.appendChild(el('h4', '', 'В наборе: ' + items.length));
+  if (!items.length) {
+    gridBox.appendChild(el('p', 'install-note', 'Пока пусто. Загрузите картинки — они появятся в панели «🙂» слева от поля ввода.'));
+  } else {
+    const grid = el('div', 'sticker-admin');
+    for (const s of items) {
+      const cell = el('div', 'sticker-cell');
+      const img = document.createElement('img');
+      img.src = netUrl(s.url);
+      img.alt = s.name;
+      img.loading = 'lazy';
+      cell.appendChild(img);
+      cell.appendChild(el('div', 'sticker-name', s.name));
+      if (store.me && String(s.by).toLowerCase() === String(store.me.name).toLowerCase()) {
+        const del = el('button', 'sticker-del', '✕');
+        del.type = 'button';
+        del.title = 'Удалить стикер';
+        del.onclick = () => deleteSticker(s.id);
+        cell.appendChild(del);
+      }
+      grid.appendChild(cell);
+    }
+    gridBox.appendChild(grid);
+  }
+  body.appendChild(gridBox);
+
+  const sect2 = el('div', 'sect');
+  sect2.appendChild(el('h4', '', 'Как пользоваться'));
+  sect2.appendChild(el('p', 'install-note', 'Кнопка «🙂» слева от поля сообщения открывает эмодзи и стикеры. Стикер уходит сразу картинкой, без текста.'));
+  body.appendChild(sect2);
+}
+
+function tabVoice(body) {
+  const s = S();
+  body.appendChild(headBlock('Голос и видео', 'Микрофон, наушники и обработка звука.'));
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Устройства'));
+  const inSel = addSelect(sect, 'Микрофон', 'Смена устройства применится при следующем входе в канал', [['', 'По умолчанию']], s.voiceInput, (v) => saveSettings({ voiceInput: v }));
+  const outSel = addSelect(sect, 'Устройство вывода', 'Наушники или колонки', [['', 'По умолчанию']], s.voiceOutput, (v) => saveSettings({ voiceOutput: v }));
+  body.appendChild(sect);
+
+  if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+    navigator.mediaDevices.enumerateDevices().then((list) => {
+      list.forEach((dev) => {
+        const opt = document.createElement('option');
+        opt.value = dev.deviceId;
+        opt.textContent = dev.label || (dev.kind === 'audioinput' ? 'Микрофон' : 'Устройство вывода');
+        if (dev.kind === 'audioinput') inSel.appendChild(opt);
+        if (dev.kind === 'audiooutput') outSel.appendChild(opt);
+      });
+      inSel.value = s.voiceInput || '';
+      outSel.value = s.voiceOutput || '';
+    }).catch(() => {});
+  }
+
+  const sect2 = el('div', 'sect');
+  sect2.appendChild(el('h4', '', 'Громкость'));
+  addRange(sect2, 'Громкость собеседников', 'Входящий звук', 0, 200, 5, s.voiceVolume, '%', (v) => saveSettings({ voiceVolume: v }));
+  addRange(sect2, 'Усиление микрофона', 'Если вас плохо слышно', 0, 200, 5, s.micGain, '%', (v) => saveSettings({ micGain: v }));
+  body.appendChild(sect2);
+
+  const sect3 = el('div', 'sect');
+  sect3.appendChild(el('h4', '', 'Обработка звука'));
+  addSwitch(sect3, 'Шумоподавление', 'Убирает гул вентилятора и улицы', s.noiseSuppress !== false, (v) => saveSettings({ noiseSuppress: v }));
+  addSwitch(sect3, 'Эхоподавление', 'Чтобы не слышать себя дважды', s.echoCancel !== false, (v) => saveSettings({ echoCancel: v }));
+  addSwitch(sect3, 'Автогромкость микрофона', 'Браузер подстраивает уровень сам', s.autoGain !== false, (v) => saveSettings({ autoGain: v }));
+  const note = el('p', 'install-note', 'Эти настройки применятся при следующем подключении к голосовому каналу.');
+  sect3.appendChild(note);
+  body.appendChild(sect3);
+
+  const sect4 = el('div', 'sect');
+  sect4.appendChild(el('h4', '', 'Соединение (TURN)'));
+  sect4.appendChild(el('p', 'install-note', 'Свой TURN-сервер нужен, когда звонок не поднимается в мобильной сети или за строгим роутером. Пока поле пустое, используется бесплатный openrelay — он не всегда отвечает.'));
+  addText(sect4, 'Адрес TURN', 'turn:host:3478,turns:host:5349', s.turnUrl || '', (v) => saveSettings({ turnUrl: v }));
+  addText(sect4, 'Логин TURN', 'Выдаёт владелец сервера', s.turnUser || '', (v) => saveSettings({ turnUser: v }));
+  addText(sect4, 'Пароль TURN', 'Хранится в ваших настройках', s.turnPass || '', (v) => saveSettings({ turnPass: v }));
+  const testRow = mkRow('Проверить соединение', 'Соберёт ICE-кандидаты и скажет, работает ли TURN');
+  const testBtn = el('button', '', 'Проверить');
+  testRow.appendChild(testBtn);
+  sect4.appendChild(testRow);
+  const testOut = el('div', 'upd-note', '');
+  sect4.appendChild(testOut);
+  testBtn.onclick = () => {
+    testBtn.disabled = true;
+    testOut.textContent = 'Проверяю…';
+    testIce().then((text) => {
+      testOut.textContent = text;
+      testBtn.disabled = false;
+    }).catch((error) => {
+      testOut.textContent = 'Ошибка: ' + (error && error.message ? error.message : error);
+      testBtn.disabled = false;
+    });
+  };
+  body.appendChild(sect4);
+}
+
+/* ------------------------------------------------- мосты: Matrix и свой сервер */
+function mxNow() {
+  return store.matrix || {};
+}
+
+function mxStatusText(mx) {
+  if (!mx || !mx.homeserver) return 'Мост не настроен. Заполните адрес сервера, токен и комнату.';
+  const bits = [];
+  if (mx.userId) bits.push('аккаунт ' + mx.userId);
+  bits.push(mx.enabled ? 'включён' : 'выключен');
+  if (mx.sent) bits.push('отправлено: ' + mx.sent);
+  if (mx.got) bits.push('получено: ' + mx.got);
+  const tail = bits.join(', ');
+  return (mx.message ? mx.message + '. ' : '') + tail.charAt(0).toUpperCase() + tail.slice(1) + '.';
+}
+
+function tabBridges(body) {
+  body.appendChild(headBlock('Мосты и сервер', 'Matrix, свой сервер вместо Cloudflare и канал обновлений.'));
+  // Запрашиваем состояние один раз: иначе ответ matrix_state перерисовывал
+  // вкладку, она снова просила состояние — и так по кругу.
+  if (!store.matrix) send({ t: 'matrix_get' });
+
+  const mx = mxNow();
+  const bridge = desktopBridge();
+  const f = {};
+
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Мост в Matrix'));
+  sect.appendChild(el('div', 'upd-note', 'Сообщения канала уходят в комнату Matrix и приходят из неё обратно. Пароль не нужен: только адрес home-сервера и access token.'));
+  const field = (key, label, hint, value, type, ph) => {
+    const row = mkRow(label, hint);
+    const input = document.createElement('input');
+    input.type = type || 'text';
+    input.value = value || '';
+    input.placeholder = ph || '';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    row.appendChild(input);
+    sect.appendChild(row);
+    f[key] = input;
+  };
+  field('homeserver', 'Home-сервер', 'Адрес вашего сервера Matrix', mx.homeserver, 'text', 'https://matrix.org');
+  field('token', 'Access token', mx.hasToken ? 'Токен сохранён (' + mx.token + ') — оставьте поле пустым, чтобы не менять' : 'Element → Настройки → Помощь и о программе → Access token', '', 'password', 'syt_…');
+  field('roomId', 'Комната', 'Идентификатор комнаты или её адрес', mx.roomId, 'text', '!abcdef:matrix.org');
+  field('channel', 'Канал Arc', 'Сюда попадут сообщения из Matrix', mx.channel || 'obshiy');
+  field('prefix', 'Приписка', 'Необязательно: «[MX] », чтобы отличать сообщения из Matrix', mx.prefix, 'text', '[MX] ');
+
+  const dirRow = mkRow('Направление', 'Что пересылать');
+  const dirSel = document.createElement('select');
+  [['both', 'В обе стороны'], ['out', 'Из Arc в Matrix'], ['in', 'Из Matrix в Arc']].forEach((pair) => {
+    const opt = document.createElement('option');
+    opt.value = pair[0];
+    opt.textContent = pair[1];
+    if ((mx.direction || 'both') === pair[0]) opt.selected = true;
+    dirSel.appendChild(opt);
+  });
+  dirRow.appendChild(dirSel);
+  sect.appendChild(dirRow);
+
+  const state = el('div', 'upd-note', mxStatusText(mx));
+  sect.appendChild(state);
+
+  const collect = (enabled) => {
+    const patch = {
+      homeserver: f.homeserver.value,
+      roomId: f.roomId.value,
+      channel: f.channel.value,
+      prefix: f.prefix.value,
+      direction: dirSel.value,
+      enabled: enabled !== false
+    };
+    const token = f.token.value.trim();
+    if (token && !token.startsWith('…')) patch.token = token;
+    return patch;
+  };
+
+  const actions = el('div', 'upd-row');
+  const btnSave = el('button', 'primary', 'Сохранить и включить');
+  btnSave.onclick = () => {
+    send({ t: 'matrix_set', ...collect(true) });
+    toast('Настройки Matrix сохранены');
+  };
+  const btnTest = el('button', '', 'Проверить связь');
+  btnTest.onclick = () => {
+    send({ t: 'matrix_test', ...collect(true) });
+    state.textContent = 'Проверяю связь с сервером Matrix…';
+  };
+  const btnPull = el('button', '', 'Забрать сообщения');
+  btnPull.onclick = () => {
+    send({ t: 'matrix_pull', ...collect(true) });
+    state.textContent = 'Забираю новые сообщения из Matrix…';
+  };
+  const btnOff = el('button', '', 'Выключить мост');
+  btnOff.onclick = () => {
+    send({ t: 'matrix_set', ...collect(false) });
+    toast('Мост выключен');
+  };
+  [btnSave, btnTest, btnPull, btnOff].forEach((b) => actions.appendChild(b));
+  sect.appendChild(actions);
+  body.appendChild(sect);
+
+  const sect2 = el('div', 'sect');
+  sect2.appendChild(el('h4', '', 'Свой сервер'));
+  if (!bridge || !bridge.serverGet) {
+    sect2.appendChild(el('div', 'upd-note', 'В браузере адрес задаёт тот сервер, откуда открыта страница. Свою копию поднимают по инструкции SELF-HOST.md, после этого достаточно открыть её адрес в приложении.'));
+  } else {
+    const rowS = mkRow('Адрес сервера', 'После сохранения приложение перезапустится и откроет этот сервер');
+    const inS = document.createElement('input');
+    inS.type = 'text';
+    inS.autocomplete = 'off';
+    inS.spellcheck = false;
+    inS.placeholder = 'https://chat.example.com';
+    rowS.appendChild(inS);
+    sect2.appendChild(rowS);
+    const actS = el('div', 'upd-row');
+    const saveS = el('button', 'primary', 'Сохранить и перезапустить');
+    const resetS = el('button', '', 'Вернуть стандартный');
+    actS.appendChild(saveS);
+    actS.appendChild(resetS);
+    sect2.appendChild(actS);
+    const noteS = el('div', 'upd-note', '');
+    sect2.appendChild(noteS);
+    let defUrl = '';
+    bridge.serverGet().then((r) => {
+      if (!r) return;
+      defUrl = r.def || '';
+      inS.value = r.url || '';
+      noteS.textContent = r.custom ? 'Сейчас приложение работает с ' + r.url : 'Сейчас используется стандартный сервер Cloudflare.';
+    }).catch(() => {});
+    const applyServer = async (value) => {
+      const r = await bridge.serverSet(value);
+      if (!r || !r.ok) {
+        noteS.textContent = (r && r.error) || 'Не удалось сохранить адрес';
+        return;
+      }
+      noteS.textContent = 'Адрес сохранён, приложение перезапускается…';
+    };
+    saveS.onclick = () => applyServer(inS.value.trim());
+    resetS.onclick = () => applyServer(defUrl);
+
+    const rowF = mkRow('Канал обновлений', 'Папка с latest.yml и установщиком — своя или стандартная');
+    const inF = document.createElement('input');
+    inF.type = 'text';
+    inF.autocomplete = 'off';
+    inF.spellcheck = false;
+    inF.placeholder = 'https://example.com/updates/';
+    rowF.appendChild(inF);
+    sect2.appendChild(rowF);
+    const actF = el('div', 'upd-row');
+    const saveF = el('button', '', 'Сохранить канал');
+    actF.appendChild(saveF);
+    sect2.appendChild(actF);
+    const noteF = el('div', 'upd-note', '');
+    sect2.appendChild(noteF);
+    bridge.feedGet().then((r) => {
+      if (!r) return;
+      inF.value = r.url || '';
+      noteF.textContent = 'Обновления ищутся в ' + (r.url || r.def || '');
+    }).catch(() => {});
+    saveF.onclick = async () => {
+      const r = await bridge.feedSet(inF.value.trim());
+      if (!r || !r.ok) {
+        noteF.textContent = (r && r.error) || 'Не удалось сохранить канал';
+        return;
+      }
+      noteF.textContent = 'Канал обновлений: ' + r.url;
+    };
+  }
+  body.appendChild(sect2);
+
+  updateBlock(body);
+}
+
+function tabAccount(body) {
+  body.appendChild(headBlock('Аккаунт', 'Вход, пароль, установка приложения и выход.'));
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Данные входа'));
+  const row = mkRow('Имя пользователя', 'По нему вас добавляют в друзья');
+  row.appendChild(el('strong', '', store.me ? store.me.name : ''));
+  sect.appendChild(row);
+  body.appendChild(sect);
+
+  // Смена пароля: три поля прямо в настройках, без лишних окон.
+  const pass = el('div', 'sect');
+  pass.appendChild(el('h4', '', 'Сменить пароль'));
+  const mkPassRow = (label, placeholder) => {
+    const r = el('div', 'field');
+    r.appendChild(el('div', 'lbl', label));
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.placeholder = placeholder || '';
+    input.autocomplete = 'new-password';
+    r.appendChild(input);
+    pass.appendChild(r);
+    return input;
+  };
+  const oldPass = mkPassRow('Текущий пароль');
+  const newPass = mkPassRow('Новый пароль', 'не короче 4 символов');
+  const newPass2 = mkPassRow('Повторите новый пароль');
+  const passHint = el('div', 'upd-note', 'После смены пароля остальные устройства выйдут из аккаунта.');
+  const passBtn = el('button', 'primary', 'Сменить пароль');
+  passBtn.type = 'button';
+  passBtn.onclick = () => {
+    const oldValue = oldPass.value;
+    const value = newPass.value;
+    const again = newPass2.value;
+    if (!oldValue) { toast('Введите текущий пароль'); return; }
+    if (value.length < 4) { toast('Новый пароль: не короче 4 символов'); return; }
+    if (value !== again) { toast('Пароли не совпадают'); return; }
+    send({ t: 'password_change', old: oldValue, new: value });
+    oldPass.value = '';
+    newPass.value = '';
+    newPass2.value = '';
+    passHint.textContent = 'Меняю пароль…';
+  };
+  const passRow = el('div', 'upd-row');
+  passRow.appendChild(passBtn);
+  pass.appendChild(passRow);
+  pass.appendChild(passHint);
+  body.appendChild(pass);
+
+  const sect2 = el('div', 'sect');
+  sect2.appendChild(el('h4', '', 'Приложение'));
+  const row2 = mkRow(isStandalone() ? 'Приложение установлено' : 'Установить на устройство', 'Откроется отдельным окном или с иконки на телефоне, без адресной строки.');
+  if (!isStandalone()) {
+    const btn = el('button', 'primary', 'Установить');
+    btn.onclick = installApp;
+    row2.appendChild(btn);
+  }
+  sect2.appendChild(row2);
+
+  // Android-версия отдельным файлом: удобно, если PWA ставить не хочется.
+  const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
+  const apkLink = el('a', 'pill', 'Скачать APK');
+  apkLink.href = '/download/Arc-native-1.4.2.apk';
+  apkLink.setAttribute('download', 'Arc-1.4.2.apk');
+  apkLink.style.textDecoration = 'none';
+  apkLink.style.display = 'inline-block';
+  apkLink.style.padding = '8px 16px';
+  apkLink.style.borderRadius = '10px';
+  apkLink.style.background = 'var(--accent)';
+  apkLink.style.color = '#fff';
+  apkLink.style.fontWeight = '600';
+  rowApk.appendChild(apkLink);
+  sect2.appendChild(rowApk);
+  body.appendChild(sect2);
+
+  const sect3 = el('div', 'sect');
+  sect3.appendChild(el('h4', '', 'Сеанс'));
+  const row3 = mkRow('Выйти из аккаунта', 'Придётся вводить пароль снова');
+  const out = el('button', '', 'Выйти');
+  out.onclick = () => {
+    if (!window.confirm('Выйти из аккаунта?')) return;
+    if (store.ws && store.ws.readyState === 1) store.ws.send(JSON.stringify({ t: 'logout' }));
+    store.token = '';
+    localStorage.removeItem('token');
+    setTimeout(() => location.reload(), 150);
+  };
+  row3.appendChild(out);
+  sect3.appendChild(row3);
+
+  // Выход на всех других устройствах: текущая сессия остаётся.
+  const rowAll = mkRow('Выйти на других устройствах', 'Аккаунт останется открыт только здесь');
+  const outAll = el('button', '', 'Выйти везде');
+  outAll.onclick = async () => {
+    const ok = await openDialog({
+      title: 'Выйти на других устройствах?',
+      text: 'На телефоне, планшете и других компьютерах придётся вводить пароль заново. Здесь вы останетесь в аккаунте.',
+      ok: 'Выйти везде',
+      danger: true,
+    });
+    if (ok) send({ t: 'logout_all' });
+  };
+  rowAll.appendChild(outAll);
+  sect3.appendChild(rowAll);
+  body.appendChild(sect3);
+
+  // Опасная зона: удаление аккаунта.
+  const sect4 = el('div', 'sect');
+  sect4.appendChild(el('h4', '', 'Удаление аккаунта'));
+  const rowDel = mkRow('Удалить аккаунт', 'Профиль, друзья и переписка исчезнут навсегда. Вернуть аккаунт нельзя.');
+  const del = el('button', 'danger', 'Удалить аккаунт');
+  del.onclick = () => openDeleteAccount();
+  rowDel.appendChild(del);
+  sect4.appendChild(rowDel);
+  body.appendChild(sect4);
+
+  const sect5 = el('div', 'sect');
+  sect5.appendChild(el('h4', '', 'Версия'));
+  const bridge = desktopBridge();
+  const verRow = mkRow('Версия приложения', 'Обновления страницы прилетают сами при открытии');
+  const verText = el('strong', '', APP_VERSION + (bridge ? ' · оболочка…' : ''));
+  verRow.appendChild(verText);
+  sect5.appendChild(verRow);
+  if (bridge && bridge.version) verText.textContent = APP_VERSION + ' · оболочка ' + bridge.version;
+  body.appendChild(sect5);
+
+  updateBlock(body);
+}
+
+// Строка с текстовым полем в настройках: значение сохраняется сразу.
+function addText(parent, label, hint, value, onSave) {
+  const row = mkRow(label, hint);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = value || '';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.oninput = () => onSave(input.value);
+  row.appendChild(input);
+  parent.appendChild(row);
+  return input;
+}
+
+// Проверка TURN: собираем ICE-кандидаты и смотрим, появился ли relay.
+function testIce() {
+  return new Promise((resolve, reject) => {
+    let pc;
+    try {
+      pc = new RTCPeerConnection({ iceServers: rtcIceServers() });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const found = { host: 0, srflx: 0, relay: 0 };
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { pc.close(); } catch (error) {}
+      if (found.relay) {
+        resolve('TURN работает: relay-кандидат найден (' + found.relay + '). Прямых ' + found.host + ', внешних ' + found.srflx + '.');
+      } else if (found.srflx) {
+        resolve('TURN не отвечает, но прямое соединение возможно (STUN работает). Голос пойдёт напрямую.');
+      } else {
+        resolve('Кандидатов почти нет: сеть режет UDP. Укажите TURN по TCP, иначе звонок не поднимется.');
+      }
+    };
+    const timer = setTimeout(finish, 9000);
+    pc.onicecandidate = (event) => {
+      if (!event.candidate) {
+        finish();
+        return;
+      }
+      const type = event.candidate.type;
+      if (type === 'relay') found.relay++;
+      else if (type === 'srflx') found.srflx++;
+      else if (type === 'host') found.host++;
+    };
+    try { pc.createDataChannel('probe'); } catch (error) {}
+    pc.createOffer().then((offer) => pc.setLocalDescription(offer)).catch((error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+// Блок «Обновления» в настройках: только в приложении Electron.
+function updateBlock(body) {
+  const bridge = desktopBridge();
+  if (!bridge || !bridge.checkUpdates) return;
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Обновления'));
+
+  const row = mkRow('Версия приложения', 'Обновления скачиваются сами и ставятся при перезапуске');
+  const ver = el('strong', '', '…');
+  row.appendChild(ver);
+  sect.appendChild(row);
+  bridge.appVersion().then((v) => { ver.textContent = 'v' + v; }).catch(() => {});
+
+  const row2 = mkRow('Проверить обновления', 'Если сервер недоступен, приложение продолжит работать как есть');
+  const btn = el('button', 'primary', 'Проверить');
+  row2.appendChild(btn);
+  sect.appendChild(row2);
+
+  const status = el('div', 'upd-note', '');
+  const bar = el('div', 'upd-bar hidden');
+  const fill = el('i');
+  bar.appendChild(fill);
+  const restart = el('button', '', 'Перезапустить и обновить');
+  restart.classList.add('hidden');
+  sect.appendChild(status);
+  sect.appendChild(bar);
+  const row3 = el('div', 'upd-row');
+  row3.appendChild(restart);
+  sect.appendChild(row3);
+  body.appendChild(sect);
+
+  const apply = (state) => {
+    const st = state || {};
+    btn.disabled = st.status === 'checking' || st.status === 'downloading' || st.status === 'available';
+    bar.classList.add('hidden');
+    restart.classList.add('hidden');
+    if (st.status === 'checking') status.textContent = 'Проверяю обновления…';
+    else if (st.status === 'available') status.textContent = 'Есть новая версия' + (st.version ? ' ' + st.version : '') + ' — скачивается…';
+    else if (st.status === 'latest') status.textContent = 'У вас последняя версия' + (st.version ? ' (' + st.version + ')' : '') + '.';
+    else if (st.status === 'downloading') {
+      bar.classList.remove('hidden');
+      fill.style.width = Math.max(0, Math.min(100, st.percent || 0)) + '%';
+      status.textContent = 'Скачиваю обновление: ' + (st.percent || 0) + '%';
+    } else if (st.status === 'ready') {
+      status.textContent = 'Обновление' + (st.version ? ' ' + st.version : '') + ' скачано — перезапустите приложение.';
+      restart.classList.remove('hidden');
+    } else if (st.status === 'error') status.textContent = 'Не удалось проверить: ' + (st.message || 'нет связи с сервером обновлений');
+    else status.textContent = 'Автопроверка при запуске и раз в 6 часов.';
+  };
+
+  btn.onclick = () => { btn.disabled = true; status.textContent = 'Проверяю…'; bridge.checkUpdates(); };
+  restart.onclick = () => bridge.installUpdate();
+  apply(null);
+  if (bridge.updateState) bridge.updateState().then(apply).catch(() => {});
+  if (updateUnsub) {
+    try { updateUnsub(); } catch (error) {}
+  }
+  updateUnsub = bridge.onUpdate(apply);
+}
+
+function renderSettings(tab) {
+  if (tab) currentTab = tab;
+  const body = $('settingsBody');
+  if (!body) return;
+  body.innerHTML = '';
+  document.querySelectorAll('.settings-nav button[data-tab]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tab === currentTab);
+  });
+  const tabs = { profile: tabProfile, appearance: tabAppearance, notify: tabNotify, privacy: tabPrivacy, voice: tabVoice, stickers: tabStickers, bridges: tabBridges, account: tabAccount };
+  (tabs[currentTab] || tabProfile)(body);
+}
+function openSettings(tab) {
+  if (tab) currentTab = tab;
+  const modal = $('settingsModal');
+  if (!modal) return;
+  renderSettings(currentTab);
+  modal.classList.remove('hidden');
+}
+function closeSettings() {
+  const modal = $('settingsModal');
+  if (modal) modal.classList.add('hidden');
+}
+if ($('navSettings')) $('navSettings').onclick = () => openSettings(currentTab);
+if ($('settingsClose')) $('settingsClose').onclick = closeSettings;
+if ($('settingsModal')) {
+  $('settingsModal').addEventListener('click', (event) => {
+    if (event.target === $('settingsModal')) closeSettings();
+  });
+}
+document.querySelectorAll('.settings-nav button[data-tab]').forEach((btn) => {
+  btn.onclick = () => renderSettings(btn.dataset.tab);
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && settingsOpen()) closeSettings();
+});
+
+try {
+  const cached = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+  applySettings(cached || {});
+} catch (error) {
+  applySettings({});
+}
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  store.installPrompt = event;
+  if (settingsOpen() && currentTab === 'account') renderSettings('account');
+});
+window.addEventListener('appinstalled', () => {
+  store.installPrompt = null;
+  toast('Приложение установлено');
+});
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
+/* ------------------------------------------------------------------ карточка профиля и удаление аккаунта (1.4.0) */
+function cardStatusLabel(user) {
+  if (!user || !user.online) return 'не в сети';
+  if (user.status === 'dnd') return 'не беспокоить';
+  if (user.status === 'idle') return 'не активен';
+  if (user.status === 'invisible') return 'не в сети';
+  return 'в сети';
+}
+function cardStatusColor(user) {
+  if (!user || !user.online) return 'var(--muted)';
+  if (user.status === 'dnd') return 'var(--danger)';
+  if (user.status === 'idle') return '#faa61a';
+  if (user.status === 'invisible') return 'var(--muted)';
+  return 'var(--ok)';
+}
+function joinedText(joined) {
+  if (!joined) return '';
+  const date = new Date(joined);
+  if (isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+function openUserCard(name) {
+  if (!name) return;
+  store.card = { name, user: null };
+  renderUserCard();
+  const back = $('cardBack');
+  if (back) back.classList.remove('hidden');
+  send({ t: 'user_card', name });
+}
+function closeUserCard() {
+  const back = $('cardBack');
+  if (back) back.classList.add('hidden');
+  store.card = null;
+}
+function cardCloseButton() {
+  const close = el('button', 'x-btn', '✕');
+  close.type = 'button';
+  close.title = 'Закрыть';
+  close.onclick = closeUserCard;
+  return close;
+}
+function cardWriteButton(user) {
+  const write = el('button', '', 'Написать');
+  write.type = 'button';
+  write.onclick = () => {
+    closeUserCard();
+    if (!store.me) return;
+    openRoom(dmRoomOf(store.me.name, user.name), 'dm', '@ ' + displayNameOf(user.name, user), user.name);
+  };
+  return write;
+}
+function renderUserCard() {
+  const box = $('cardBody');
+  if (!box) return;
+  box.innerHTML = '';
+  const card = store.card || {};
+  const user = card.user;
+  if (!user) {
+    box.appendChild(el('h3', '', 'Профиль'));
+    box.appendChild(el('p', '', 'Загружаю…'));
+    box.appendChild(cardCloseButton());
+    return;
+  }
+  box.appendChild(cardCloseButton());
+  const top = el('div', 'card-top');
+  const ava = el('div', 'card-ava');
+  const url = user.avatarUrl || avatarUrlOf(user.name);
+  if (url) {
+    const img = document.createElement('img');
+    img.src = netUrl(url);
+    img.alt = '';
+    ava.appendChild(img);
+  } else {
+    ava.textContent = initials(user.displayName || user.name);
+    ava.style.background = user.color || colorOf(user.name);
+  }
+  const names = el('div', '');
+  names.appendChild(el('div', 'card-name', user.displayName || user.name));
+  names.appendChild(el('div', 'card-login', '@' + user.name));
+  const state = el('div', 'card-login');
+  const dot = el('span', 'card-dot');
+  dot.style.background = cardStatusColor(user);
+  state.append(dot, document.createTextNode(cardStatusLabel(user)));
+  names.appendChild(state);
+  top.append(ava, names);
+  box.appendChild(top);
+
+  if (user.bio) box.appendChild(el('p', 'card-bio', user.bio));
+
+  const meta = el('div', 'card-meta');
+  if (user.voiceRoom) meta.appendChild(el('div', '', 'в голосовом канале #' + user.voiceRoom));
+  const joined = joinedText(user.joined);
+  if (joined) meta.appendChild(el('div', '', 'с нами с ' + joined));
+  if (meta.childNodes.length) box.appendChild(meta);
+
+  const me = store.me ? String(store.me.name).toLowerCase() : '';
+  const isMe = !!me && String(user.name).toLowerCase() === me;
+  const actions = el('div', 'dlg-row');
+  if (isMe) {
+    actions.appendChild(el('span', 'ver-line', 'Это вы'));
+  } else if (user.friend) {
+    actions.append(cardWriteButton(user), (() => {
+      const remove = el('button', '', 'Убрать из друзей');
+      remove.type = 'button';
+      remove.onclick = async () => {
+        const ok = await openDialog({
+          title: 'Убрать из друзей?',
+          text: 'Вы больше не будете в списке друзей друг у друга.',
+          ok: 'Убрать',
+          danger: true,
+        });
+        if (ok) {
+          send({ t: 'friend_remove', name: user.name });
+          closeUserCard();
+        }
+      };
+      return remove;
+    })());
+  } else if (user.pending === 'in') {
+    const accept = el('button', 'ok', 'Принять заявку');
+    accept.type = 'button';
+    accept.onclick = () => {
+      send({ t: 'friend_accept', name: user.name });
+      closeUserCard();
+    };
+    actions.append(accept, cardWriteButton(user));
+  } else if (user.pending === 'out') {
+    const wait = el('button', '', 'Заявка отправлена');
+    wait.type = 'button';
+    wait.disabled = true;
+    actions.append(wait, cardWriteButton(user));
+  } else {
+    const add = el('button', 'ok', 'Добавить в друзья');
+    add.type = 'button';
+    add.onclick = () => {
+      send({ t: 'friend_add', name: user.name });
+      toast('Заявка отправлена ' + displayNameOf(user.name, user));
+      closeUserCard();
+    };
+    actions.append(cardWriteButton(user), add);
+  }
+  box.appendChild(actions);
+}
+if ($('cardBack')) {
+  $('cardBack').addEventListener('click', (event) => { if (event.target === $('cardBack')) closeUserCard(); });
+}
+
+function openDeleteAccount() {
+  const back = $('delBack');
+  if (!back) return;
+  const pass = $('delPass');
+  if (pass) pass.value = '';
+  back.classList.remove('hidden');
+  setTimeout(() => { if (pass) pass.focus(); }, 40);
+}
+function closeDeleteAccount() {
+  const back = $('delBack');
+  if (back) back.classList.add('hidden');
+}
+function submitDeleteAccount() {
+  const input = $('delPass');
+  const password = input ? input.value : '';
+  if (!password) { toast('Введите пароль'); return; }
+  closeDeleteAccount();
+  send({ t: 'account_delete', password });
+}
+if ($('delCancel')) $('delCancel').onclick = closeDeleteAccount;
+if ($('delOk')) $('delOk').onclick = submitDeleteAccount;
+if ($('delBack')) {
+  $('delBack').addEventListener('click', (event) => { if (event.target === $('delBack')) closeDeleteAccount(); });
+  if ($('delPass')) $('delPass').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); submitDeleteAccount(); }
+  });
+}
+if ($('lightbox')) $('lightbox').onclick = () => hideLightbox();
+if ($('replyBarClose')) $('replyBarClose').onclick = () => clearReply();
+
+// Esc закрывает верхний слой: подбор реакции, лайтбокс, карточку, удаление, поиск.
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  if (reactionPicker) { closeReactionPicker(); return; }
+  const light = $('lightbox');
+  if (light && !light.classList.contains('hidden')) { hideLightbox(); return; }
+  const card = $('cardBack');
+  if (card && !card.classList.contains('hidden')) { closeUserCard(); return; }
+  const del = $('delBack');
+  if (del && !del.classList.contains('hidden')) { closeDeleteAccount(); return; }
+  if (searchPanelOpen()) closeSearchPanel();
+});
+
+/* ------------------------------------------------------------------ картинки, эмодзи, стикеры, звонок */
+const EMOJI_SET = '😀 😃 😄 😁 😆 😅 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 💀 💩 🤡 👻 👽 🤖 😺 😸 😹 😻 😼 😽 🙀 😿 😾 👋 🤚 ✋ 🖖 👌 🤏 ✌️ 🤞 🤟 🤘 🤙 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 👐 🤲 🤝 🙏 💅 💪 🦾 👀 🧠 💃 🕺 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 🔥 ✨ ⭐ 🌟 💫 ⚡ 💥 💯 ✅ ❌ ❓ ❗ 💤 💬 🎉 🎊 🎁 🎂 🍰 🍕 🍔 🍟 🌮 🍿 🍩 🍪 ☕ 🍺 🍷 🥂 🎮 🎲 🎯 🎧 🎵 🎸 🚀 🛸 🌍 🌙 ☀️ 🌈 ☂️ ❄️ 🥇 🏆 ⚽ 🏀 🎾 🏓 🎳 🏁'.split(' ');
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('не удалось прочитать файл'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('битая картинка'));
+    img.src = src;
+  });
+}
+
+// Готовим картинку к отправке: уменьшаем и жмём, пока base64 не влезет в лимит.
+async function prepareImage(file, maxSide, maxChars) {
+  const mime = String(file.type || '').toLowerCase();
+  if (!IMAGE_TYPES.includes(mime)) throw new Error('нужен PNG, JPG, WEBP или GIF');
+  if (file.size > 12 * 1024 * 1024) throw new Error('файл больше 12 МБ');
+  const raw = await readAsDataUrl(file);
+  const b64raw = raw.replace(/^data:[^,]*,/, '');
+  if (b64raw.length <= maxChars && (mime !== 'image/jpeg' || file.size <= maxChars)) {
+    return { mime, data: b64raw };
+  }
+  const img = await loadImage(raw);
+  let side = Math.max(1, Math.min(maxSide, Math.max(img.width, img.height)));
+  for (let attempt = 0; attempt < 7; attempt++) {
+    const scale = side / Math.max(img.width, img.height, 1);
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const out = canvas.toDataURL('image/jpeg', 0.86).replace(/^data:[^,]*,/, '');
+    if (out.length <= maxChars) return { mime: 'image/jpeg', data: out };
+    side = Math.round(side * 0.75);
+  }
+  throw new Error('не удалось ужать картинку');
+}
+
+async function pickAvatar(file) {
+  if (!file) return;
+  try {
+    toast('Готовлю фото…');
+    const img = await prepareImage(file, 512, 380000);
+    send({ t: 'avatar_upload', mime: img.mime, data: img.data });
+  } catch (error) {
+    toast('Аватар: ' + (error.message || 'не получилось'));
+  }
+}
+
+function removeAvatar() {
+  send({ t: 'avatar_delete' });
+  toast('Фото убрано');
+}
+
+/* --------------------------------------------------- отправка картинки в чат (1.4.0) */
+const MAX_MEDIA_BYTES = 2500000;
+const MAX_MEDIA_SIDE = 1600;
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    if (canvas.toBlob) {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('не удалось сжать картинку'));
+      }, type, quality);
+      return;
+    }
+    try {
+      const data = String(canvas.toDataURL(type, quality) || '');
+      const binary = atob(data.split(',')[1] || '');
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      resolve(new Blob([bytes], { type }));
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+async function pngHasAlpha(file) {
+  try {
+    const img = await loadImage(await readAsDataUrl(file));
+    const canvas = document.createElement('canvas');
+    const width = Math.min(64, img.width || 64);
+    const height = Math.min(64, img.height || 64);
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !ctx.getImageData) return false;
+    ctx.drawImage(img, 0, 0, width, height);
+    const data = ctx.getImageData(0, 0, width, height).data;
+    for (let i = 3; i < data.length; i += 4) if (data[i] < 250) return true;
+    return false;
+  } catch (error) {
+    return false;
+  }
+}
+// Длинная сторона — не больше 1600 px, JPEG 0.85. Исключение из задания:
+// небольшой PNG с прозрачностью (до 400 КБ) отправляем как есть, без пережатия.
+async function prepareMedia(file) {
+  const mime = String(file.type || '').toLowerCase();
+  if (!IMAGE_TYPES.includes(mime)) throw new Error('нужна картинка: PNG, JPG, WEBP или GIF');
+  if (mime === 'image/gif') {
+    if (file.size > MAX_MEDIA_BYTES) throw new Error('GIF больше 2,5 МБ — отправьте поменьше');
+    return { blob: file, mime: 'image/gif' };
+  }
+  if (mime === 'image/png' && file.size <= 400 * 1024 && (await pngHasAlpha(file))) {
+    return { blob: file, mime: 'image/png' };
+  }
+  const img = await loadImage(await readAsDataUrl(file));
+  const longSide = Math.max(img.width || 1, img.height || 1);
+  const scale = longSide > MAX_MEDIA_SIDE ? MAX_MEDIA_SIDE / longSide : 1;
+  const width = Math.max(1, Math.round((img.width || 1) * scale));
+  const height = Math.max(1, Math.round((img.height || 1) * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('браузер не умеет готовить картинки');
+  ctx.drawImage(img, 0, 0, width, height);
+  const blob = await canvasToBlob(canvas, 'image/jpeg', 0.85);
+  return { blob, mime: 'image/jpeg' };
+}
+function renderUploadBar() {
+  const bar = $('mediaBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !(store.uploading > 0));
+}
+async function uploadMedia(file) {
+  if (!file) return;
+  if (!store.room) { toast('Сначала откройте чат'); return; }
+  const room = store.room;
+  const caption = $('text') ? String($('text').value || '').trim() : '';
+  const reply = store.replyTo;
+  store.uploading = (store.uploading || 0) + 1;
+  renderUploadBar();
+  try {
+    const prepared = await prepareMedia(file);
+    if (!prepared || !prepared.blob) throw new Error('картинка не подготовилась');
+    if (prepared.blob.size > MAX_MEDIA_BYTES) throw new Error('после сжатия больше 2,5 МБ — отправьте поменьше');
+    const res = await fetch(netUrl('/api/media'), {
+      method: 'POST',
+      headers: { 'x-token': store.token, 'content-type': prepared.mime },
+      body: prepared.blob,
+    });
+    let data = null;
+    try { data = await res.json(); } catch (error) { data = null; }
+    if (!res.ok || !data || !data.id) throw new Error((data && data.error) || 'сервер не принял картинку');
+    const payload = { t: 'msg', room, text: caption, mediaId: data.id };
+    if (reply && reply.id != null) payload.replyTo = reply.id;
+    send(payload);
+    if ($('text')) $('text').value = '';
+    clearReply();
+  } catch (error) {
+    toast('Картинка: ' + (error && error.message ? error.message : 'не получилось'));
+  } finally {
+    store.uploading = Math.max(0, (store.uploading || 0) - 1);
+    renderUploadBar();
+  }
+}
+if ($('attachBtn') && $('mediaFile')) {
+  $('attachBtn').onclick = () => $('mediaFile').click();
+  $('mediaFile').onchange = () => {
+    const file = $('mediaFile').files && $('mediaFile').files[0];
+    $('mediaFile').value = '';
+    if (file) uploadMedia(file);
+  };
+}
+const composerBox = $('composer');
+if (composerBox) {
+  composerBox.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    composerBox.classList.add('drag');
+  });
+  composerBox.addEventListener('dragleave', () => composerBox.classList.remove('drag'));
+  composerBox.addEventListener('drop', (event) => {
+    event.preventDefault();
+    composerBox.classList.remove('drag');
+    const files = event.dataTransfer ? [...event.dataTransfer.files] : [];
+    const image = files.find((one) => IMAGE_TYPES.includes(String(one.type || '').toLowerCase()));
+    if (image) uploadMedia(image);
+    else if (files.length) toast('Нужна картинка: PNG, JPG, WEBP или GIF');
+  });
+}
+// Ctrl+V со скриншотом в буфере обмена.
+document.addEventListener('paste', (event) => {
+  const items = (event.clipboardData && event.clipboardData.items) || [];
+  for (const item of items) {
+    if (item.kind !== 'file') continue;
+    const file = item.getAsFile ? item.getAsFile() : null;
+    if (!file) continue;
+    if (!IMAGE_TYPES.includes(String(file.type || '').toLowerCase())) continue;
+    event.preventDefault();
+    uploadMedia(file);
+    return;
+  }
+});
+
+/* --------------------------------------------------- Web Push (1.4.0) */
+const PUSH_FLAG = 'messenger.push.enabled';
+const PUSH_SUBSCRIBED = 'messenger.push.subscribed';
+function pushEnabledPref() {
+  return localStorage.getItem(PUSH_FLAG) !== '0';
+}
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (String(base64String).length % 4)) % 4);
+  const base64 = (String(base64String) + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+// Подписка одна на браузер: существующую переиспользуем, новую отправляем на сервер.
+async function subscribePush() {
+  try {
+    if (!store.pushKey || !pushSupported()) return;
+    if (!pushEnabledPref()) return;
+    if (Notification.permission !== 'granted') return;
+    const registration = await navigator.serviceWorker.ready;
+    if (!registration || !registration.pushManager) return;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(store.pushKey),
+      });
+    }
+    if (!subscription) return;
+    const json = subscription.toJSON ? subscription.toJSON() : subscription;
+    if (!json || !json.endpoint) return;
+    send({ t: 'push_subscribe', subscription: { endpoint: json.endpoint, keys: json.keys || {} } });
+    localStorage.setItem(PUSH_SUBSCRIBED, '1');
+  } catch (error) {
+    // Ошибки push не должны ломать интерфейс — только консоль.
+    console.warn('push subscribe', error);
+  }
+}
+async function unsubscribePush() {
+  try { send({ t: 'push_unsubscribe' }); } catch (error) {}
+  try {
+    if (pushSupported()) {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = registration && registration.pushManager
+        ? await registration.pushManager.getSubscription()
+        : null;
+      if (subscription) await subscription.unsubscribe();
+    }
+  } catch (error) {
+    console.warn('push unsubscribe', error);
+  }
+  localStorage.removeItem(PUSH_SUBSCRIBED);
+}
+// После входа подписываемся один раз: флаг в localStorage.
+function maybeSubscribePush() {
+  if (localStorage.getItem(PUSH_SUBSCRIBED) === '1') return;
+  if (!store.pushKey) return;
+  subscribePush();
+}
+
+function fillEmoji() {
+  const box = $('epEmoji');
+  if (!box || box.dataset.ready) return;
+  box.dataset.ready = '1';
+  box.classList.add('ep-emoji');
+  for (const sym of EMOJI_SET) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = sym;
+    b.title = sym;
+    b.onclick = () => insertAtCursor(sym);
+    box.appendChild(b);
+  }
+}
+
+function insertAtCursor(text) {
+  const input = $('text');
+  if (!input) return;
+  const start = input.selectionStart == null ? input.value.length : input.selectionStart;
+  const end = input.selectionEnd == null ? input.value.length : input.selectionEnd;
+  input.value = input.value.slice(0, start) + text + input.value.slice(end);
+  const pos = start + text.length;
+  input.focus();
+  try { input.setSelectionRange(pos, pos); } catch (error) {}
+}
+
+function emojiIsOpen() {
+  const panel = $('emojiPanel');
+  return !!panel && !panel.classList.contains('hidden');
+}
+
+function toggleEmoji(force) {
+  const panel = $('emojiPanel');
+  if (!panel) return;
+  const want = typeof force === 'boolean' ? force : panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !want);
+  if (want) {
+    fillEmoji();
+    renderEmojiPanel();
+  }
+}
+
+function selectEmojiTab(name) {
+  document.querySelectorAll('.ep-tab').forEach((b) => b.classList.toggle('active', b.dataset.ep === name));
+  const emojiBox = $('epEmoji');
+  const stickerBox = $('epStickers');
+  if (emojiBox) emojiBox.classList.toggle('hidden', name !== 'emoji');
+  if (stickerBox) stickerBox.classList.toggle('hidden', name !== 'stickers');
+  renderEmojiPanel();
+}
+
+function renderEmojiPanel() {
+  const box = $('epStickers');
+  if (!box) return;
+  box.innerHTML = '';
+  const items = store.stickers || [];
+  if (!items.length) {
+    box.appendChild(el('div', 'ep-empty', 'Стикеров пока нет. Добавьте картинки в настройках: «Стикеры и эмодзи».'));
+    return;
+  }
+  const grid = el('div', 'ep-stickers');
+  for (const s of items) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ep-sticker';
+    btn.title = s.name;
+    const img = document.createElement('img');
+    img.src = netUrl(s.url);
+    img.alt = s.name;
+    img.loading = 'lazy';
+    btn.appendChild(img);
+    btn.onclick = () => {
+      if (!store.room) return;
+      send({ t: 'msg', room: store.room, sticker: s.id });
+      toggleEmoji(false);
+    };
+    grid.appendChild(btn);
+  }
+  box.appendChild(grid);
+}
+
+async function addSticker(file) {
+  if (!file) return;
+  try {
+    const img = await prepareImage(file, 320, 150000);
+    const name = [...String(file.name || 'стикер').replace(/\.[^.]+$/, '').trim()].slice(0, 32).join('') || 'стикер';
+    send({ t: 'sticker_add', mime: img.mime, data: img.data, name });
+  } catch (error) {
+    toast('Стикер: ' + (error.message || 'не получилось'));
+  }
+}
+
+function deleteSticker(id) {
+  if (!id) return;
+  send({ t: 'sticker_delete', id });
+}
+
+if ($('emojiBtn')) $('emojiBtn').onclick = () => toggleEmoji();
+if ($('emojiClose')) $('emojiClose').onclick = () => toggleEmoji(false);
+document.querySelectorAll('.ep-tab').forEach((b) => {
+  b.onclick = () => selectEmojiTab(b.dataset.ep);
+});
+
+/* ------------------------------------------------------------------ звонок и показ экрана */
+function showCall() {
+  const stage = $('callStage');
+  if (!stage) return;
+  stage.classList.remove('hidden');
+  renderCall();
+}
+
+function hideCall() {
+  const stage = $('callStage');
+  if (stage) stage.classList.add('hidden');
+}
+
+function updateScreenBtn() {
+  const btn = $('screenBtn');
+  if (!btn) return;
+  btn.classList.toggle('on', !!store.screenOn);
+  btn.textContent = store.screenOn ? 'Стоп экран' : 'Экран';
+}
+
+// В приложении Electron системного диалога выбора источника нет:
+// список экранов и окон рисуем сами из desktopCapturer.
+function desktopBridge() {
+  return window.messengerDesktop && window.messengerDesktop.isDesktop ? window.messengerDesktop : null;
+}
+
+function pickScreenSource() {
+  const bridge = desktopBridge();
+  if (!bridge || !bridge.screenSources) return Promise.resolve('');
+  return bridge.screenSources().then((sources) => new Promise((resolve) => {
+    const back = $('srcBack');
+    const list = $('srcList');
+    if (!back || !list) {
+      resolve('');
+      return;
+    }
+    let kind = 'screen';
+    let settled = false;
+    const done = (id) => {
+      if (settled) return;
+      settled = true;
+      back.classList.add('hidden');
+      document.querySelectorAll('#srcTabs button').forEach((b) => { b.onclick = null; });
+      if ($('srcCancel')) $('srcCancel').onclick = null;
+      resolve(id || '');
+    };
+    const draw = () => {
+      document.querySelectorAll('#srcTabs button').forEach((b) => b.classList.toggle('on', b.dataset.kind === kind));
+      list.innerHTML = '';
+      const items = (sources || []).filter((s) => s.kind === kind);
+      if (!items.length) {
+        list.appendChild(el('div', 'src-empty', kind === 'screen' ? 'Экраны не найдены' : 'Окон не найдено'));
+        return;
+      }
+      items.forEach((src) => {
+        const card = el('button', 'src-item');
+        card.type = 'button';
+        if (src.thumbnail) {
+          const img = document.createElement('img');
+          img.className = 'src-thumb';
+          img.src = src.thumbnail;
+          img.alt = '';
+          card.appendChild(img);
+        }
+        const name = el('div', 'src-name');
+        if (src.icon) {
+          const icon = document.createElement('img');
+          icon.className = 'src-icon';
+          icon.src = src.icon;
+          icon.alt = '';
+          name.appendChild(icon);
+        }
+        name.appendChild(document.createTextNode(src.name || 'Без названия'));
+        card.appendChild(name);
+        card.onclick = () => done(src.id);
+        list.appendChild(card);
+      });
+    };
+    document.querySelectorAll('#srcTabs button').forEach((b) => {
+      b.onclick = () => { kind = b.dataset.kind; draw(); };
+    });
+    if ($('srcCancel')) $('srcCancel').onclick = () => done('');
+    draw();
+    back.classList.remove('hidden');
+  }));
+}
+
+async function startScreen() {
+  if (!store.voiceRoom) {
+    toast('Сначала войдите в голосовой канал');
+    return;
+  }
+  if (store.screenOn) {
+    stopScreen();
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    toast('Этот браузер не умеет показывать экран');
+    return;
+  }
+  const bridge = desktopBridge();
+  if (bridge && bridge.screenSources) {
+    const sourceId = await pickScreenSource();
+    if (!sourceId) {
+      toast('Показ экрана отменён');
+      return;
+    }
+    try { await bridge.pickScreenSource(sourceId); } catch (error) {}
+  }
+  let stream;
+  try {
+    // В приложении со звуком: на Windows захватывается звук системы.
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 15 },
+      audio: !!bridge,
+    });
+  } catch (error) {
+    toast('Показ экрана отменён');
+    return;
+  }
+  store.screenStream = stream;
+  store.screenOn = true;
+  const track = stream.getVideoTracks()[0];
+  if (track) track.onended = () => stopScreen(true);
+  send({ t: 'voice_screen', sharing: true });
+  for (const [name, peer] of store.peers) {
+    try {
+      stream.getTracks().forEach((t) => peer.pc.addTrack(t, stream));
+      send({ t: 'rtc', to: name, kind: 'renego' });
+    } catch (error) {}
+  }
+  updateScreenBtn();
+  renderCall();
+  toast('Показываете экран канала');
+}
+
+function stopScreen(fromTrack) {
+  const stream = store.screenStream;
+  const screenIds = new Set(stream ? stream.getTracks().map((track) => track.id) : []);
+  store.screenOn = false;
+  store.screenStream = null;
+  send({ t: 'voice_screen', sharing: false });
+  for (const [name, peer] of store.peers) {
+    try {
+      peer.pc.getSenders().forEach((sender) => {
+        const track = sender.track;
+        if (!track) return;
+        // Убираем и видео, и звук экрана: голос остаётся.
+        if (screenIds.has(track.id) || (track.kind === 'video' && !screenIds.size)) peer.pc.removeTrack(sender);
+      });
+      send({ t: 'rtc', to: name, kind: 'renego' });
+    } catch (error) {}
+  }
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  updateScreenBtn();
+  renderCall();
+  if (!fromTrack) toast('Показ экрана остановлен');
+}
+
+function renderCall() {
+  const stage = $('callStage');
+  if (!stage || stage.classList.contains('hidden')) return;
+  const users = store.voiceUsers || [];
+  const limit = store.voiceLimit || 8;
+  const title = $('callTitle');
+  if (title) title.textContent = store.voiceRoom ? 'Голосовой канал # ' + store.voiceRoom : 'Звонок';
+  const count = $('callCount');
+  if (count) count.textContent = users.length + ' из ' + limit;
+
+  // Большая сцена - экран того, кто показывает.
+  const sharer = users.find((u) => u.screen && !(store.me && u.name === store.me.name));
+  const stageBox = $('screenStage');
+  const video = $('screenVideo');
+  const cap = $('screenCap');
+  const myShare = store.screenOn && store.screenStream;
+  if (stageBox && video) {
+    const peer = sharer ? store.peers.get(sharer.name) : null;
+    const remote = peer && peer.screenStream;
+    if (myShare) {
+      stageBox.classList.remove('hidden');
+      if (video.srcObject !== store.screenStream) video.srcObject = store.screenStream;
+      if (cap) cap.textContent = 'Ваш экран';
+    } else if (remote) {
+      stageBox.classList.remove('hidden');
+      if (video.srcObject !== remote) video.srcObject = remote;
+      if (cap) cap.textContent = sharer.name + ' показывает экран';
+    } else {
+      stageBox.classList.add('hidden');
+      video.srcObject = null;
+    }
+  }
+
+  const grid = $('callGrid');
+  if (!grid) return;
+  // 1–2 участника крупно, 3–5 обычной сеткой, 6–8 — плотной в 4 колонки.
+  const tiles = users.length;
+  grid.className = 'call-grid' + (tiles >= 8 ? ' n8' : tiles === 7 ? ' n7' : tiles >= 6 ? ' n6' : '');
+  grid.innerHTML = '';
+  for (const u of users) {
+    const tile = el('div', 'vtile');
+    tile.appendChild(avatar(u.name));
+    const name = el('div', 'vname', u.name + (store.me && u.name === store.me.name ? ' (вы)' : ''));
+    tile.appendChild(name);
+    const state = el('div', 'vstate', u.muted ? 'микрофон выключен' : 'говорит');
+    tile.appendChild(state);
+    if (u.screen) tile.appendChild(el('div', 'vscreen', 'показывает экран'));
+    grid.appendChild(tile);
+  }
+  if (!users.length) grid.appendChild(el('div', 'ep-empty', 'В канале пока никого'));
+}
+
+if ($('screenBtn')) $('screenBtn').onclick = () => startScreen();
+if ($('callOpen')) $('callOpen').onclick = () => showCall();
+if ($('callClose')) $('callClose').onclick = () => hideCall();
+
+/* ------------------------------------------------------------------ старт */
+if (store.token) {
+  start();
+} else {
+  setAuthMode('login');
+}
+</script>
+</body>
+</html>

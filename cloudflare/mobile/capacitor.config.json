@@ -1,0 +1,11 @@
+﻿{
+  "appId": "ru.arc.messenger",
+  "appName": "Arc",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

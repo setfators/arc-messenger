@@ -1,0 +1,31 @@
+# Заголовки для статики (страница, иконки, манифест, service worker).
+# Платформа отдаёт совпавшие файлы из public/ напрямую, до кода воркера,
+# поэтому secure() в src/index.js на них не срабатывает — заголовки задаём здесь.
+# Формат: https://developers.cloudflare.com/workers/static-assets/headers/
+# Внимание: на ответы самого воркера (/health, /api/*, /ws, /avatar/*, /sticker/*,
+# /updates/*.exe) этот файл не влияет — там заголовки ставит код воркера.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), geolocation=(), microphone=(self)
+
+# HTML не кэшируем надолго: обновление страницы должно прилетать сразу.
+# Отдельные правила, а не /*, чтобы не переопределять Cache-Control
+# у иконок, манифеста и крупных частей обновления (~24 МиБ).
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Установщик Android: отдаём как APK и не кэшируем надолго, чтобы новая
+# версия файла подхватывалась. .well-known для привязки домена к приложению.
+/download/*
+  Content-Type: application/vnd.android.package-archive
+  Cache-Control: public, max-age=0, must-revalidate
+
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  Cache-Control: public, max-age=3600

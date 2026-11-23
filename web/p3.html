@@ -1,0 +1,209 @@
+/* ------------------------------------------------------------------ голосовой чат */
+async function ensureMic() {
+  if (store.localStream) return store.localStream;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('браузер не даёт доступ к микрофону — нужен адрес https://');
+  }
+  store.localStream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  return store.localStream;
+}
+
+async function joinVoice(room) {
+  if (!window.RTCPeerConnection) { toast('Браузер не поддерживает голосовой чат'); return; }
+  try {
+    await ensureMic();
+  } catch (error) {
+    toast('Микрофон недоступен: ' + error.message);
+    return;
+  }
+  if (store.voiceRoom && store.voiceRoom !== room) leaveVoice(true);
+  for (const name of [...store.peers.keys()]) closePeer(name);
+  store.muted = false;
+  store.voiceRoom = room;
+  store.voiceUsers = [{ name: store.me.name, muted: false }];
+  renderVoiceBox();
+  send({ t: 'voice_join', room });
+  toast('Вы в голосовом канале ' + room);
+}
+
+function leaveVoice(silent) {
+  if (!store.voiceRoom) return;
+  send({ t: 'voice_leave' });
+  for (const name of [...store.peers.keys()]) closePeer(name);
+  store.voiceRoom = null;
+  store.voiceUsers = [];
+  if (store.localStream) {
+    store.localStream.getTracks().forEach((track) => track.stop());
+    store.localStream = null;
+  }
+  renderVoiceBox();
+  renderChannels();
+  if (!silent) toast('Вы вышли из голосового канала');
+}
+
+function renderVoiceBox() {
+  const box = $('voiceBox');
+  if (!store.voiceRoom) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+  $('voiceHead').textContent = 'Голос: ' + store.voiceRoom;
+  const list = $('voiceUsers');
+  list.innerHTML = '';
+  for (const user of store.voiceUsers) {
+    const row = document.createElement('div');
+    row.className = 'vuser';
+    const dot = document.createElement('span');
+    dot.className = 'vdot';
+    dot.style.background = user.muted ? 'var(--danger)' : 'var(--ok)';
+    row.appendChild(dot);
+    const name = document.createElement('span');
+    name.textContent = user.name + (store.me && user.name === store.me.name ? ' (вы)' : '') + (user.muted ? ' 🔇' : '');
+    row.appendChild(name);
+    list.appendChild(row);
+  }
+  const mic = $('micBtn');
+  mic.classList.toggle('on', store.muted);
+  mic.textContent = store.muted ? '🔇 Включить' : '🎤 Микрофон';
+}
+
+function handleVoiceState(data) {
+  const users = data.users || [];
+  const inRoom = store.me && users.some((u) => u.name === store.me.name);
+  if (inRoom) {
+    store.voiceRoom = data.room;
+    store.voiceUsers = users;
+    syncPeers(users);
+    renderVoiceBox();
+  } else if (store.voiceRoom === data.room) {
+    store.voiceUsers = users;
+    syncPeers(users);
+    renderVoiceBox();
+  }
+}
+
+function syncPeers(users) {
+  const others = users.map((u) => u.name).filter((n) => n !== store.me.name);
+  const present = new Set(others);
+  for (const name of [...store.peers.keys()]) {
+    if (!present.has(name)) closePeer(name);
+  }
+  for (const name of others) {
+    if (store.peers.has(name)) continue;
+    const peer = createPeer(name);
+    if (store.me.name < name) negotiate(peer);
+  }
+}
+
+function createPeer(name) {
+  const pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ],
+  });
+  const peer = { pc, name, pending: [], audio: null };
+  store.peers.set(name, peer);
+
+  if (store.localStream) {
+    store.localStream.getTracks().forEach((track) => pc.addTrack(track, store.localStream));
+  }
+  pc.onicecandidate = (event) => {
+    if (!event.candidate) return;
+    const candidate = event.candidate.toJSON ? event.candidate.toJSON() : event.candidate;
+    send({ t: 'rtc', to: name, kind: 'ice', payload: candidate });
+  };
+  pc.ontrack = (event) => {
+    if (peer.audio) return;
+    const audio = document.createElement('audio');
+    audio.autoplay = true;
+    audio.srcObject = event.streams[0];
+    document.body.appendChild(audio);
+    audio.play().catch(() => {});
+    peer.audio = audio;
+  };
+  return peer;
+}
+
+function closePeer(name) {
+  const peer = store.peers.get(name);
+  if (!peer) return;
+  try { peer.pc.close(); } catch {}
+  if (peer.audio) {
+    peer.audio.pause();
+    peer.audio.srcObject = null;
+    peer.audio.remove();
+  }
+  store.peers.delete(name);
+}
+
+async function negotiate(peer) {
+  try {
+    const offer = await peer.pc.createOffer();
+    await peer.pc.setLocalDescription(offer);
+    send({ t: 'rtc', to: peer.name, kind: 'offer', payload: { type: 'offer', sdp: offer.sdp } });
+  } catch (error) {
+    console.warn('offer', error);
+  }
+}
+
+async function flushCandidates(peer) {
+  while (peer.pending.length) {
+    const candidate = peer.pending.shift();
+    try { await peer.pc.addIceCandidate(candidate); } catch {}
+  }
+}
+
+async function handleRtc(data) {
+  const name = data.from;
+  if (!name) return;
+  try {
+    if (data.kind === 'offer') {
+      let peer = store.peers.get(name);
+      if (!peer) peer = createPeer(name);
+      await peer.pc.setRemoteDescription(new RTCSessionDescription(data.payload));
+      const answer = await peer.pc.createAnswer();
+      await peer.pc.setLocalDescription(answer);
+      send({ t: 'rtc', to: name, kind: 'answer', payload: { type: 'answer', sdp: answer.sdp } });
+      await flushCandidates(peer);
+    } else if (data.kind === 'answer') {
+      const peer = store.peers.get(name);
+      if (!peer) return;
+      await peer.pc.setRemoteDescription(new RTCSessionDescription(data.payload));
+      await flushCandidates(peer);
+    } else if (data.kind === 'ice') {
+      const peer = store.peers.get(name);
+      if (!peer) return;
+      if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(data.payload);
+      else peer.pending.push(data.payload);
+    }
+  } catch (error) {
+    console.warn('rtc', error);
+  }
+}
+
+$('micBtn').onclick = () => {
+  const track = store.localStream && store.localStream.getAudioTracks()[0];
+  store.muted = !store.muted;
+  if (track) track.enabled = !store.muted;
+  send({ t: 'voice_mute', muted: store.muted });
+  renderVoiceBox();
+};
+$('leaveVoice').onclick = () => leaveVoice();
+
+window.addEventListener('beforeunload', () => {
+  if (store.voiceRoom) send({ t: 'voice_leave' });
+});
+
+/* ------------------------------------------------------------------ старт */
+if (store.token) {
+  start();
+} else {
+  setAuthMode('login');
+}
+</script>
+</body>
+</html>
