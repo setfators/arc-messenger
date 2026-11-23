@@ -22,24 +22,24 @@ check('  разрешает origin приложения', pre.headers.get('acces
 check('  разрешает POST', (pre.headers.get('access-control-allow-methods') || '').includes('POST'), pre.headers.get('access-control-allow-methods'));
 check('  разрешает content-type', (pre.headers.get('access-control-allow-headers') || '').includes('content-type'), pre.headers.get('access-control-allow-headers'));
 
-// 2. Реальный POST с origin приложения.
+// 2. Реальный POST с origin приложения. Регистрация может быть закрыта кодом —
+// тогда ждём 403, но заголовок CORS должен быть в любом ответе.
 const reg = await fetch(B + '/api/register', {
   method: 'POST',
   headers: { 'content-type': 'application/json', origin: ORIGIN },
   body: JSON.stringify({ name: 'cors' + Date.now().toString(36), password: 'parol123' }),
 });
-check('POST /api/register принимается', reg.status === 200, String(reg.status));
+check('POST /api/register отвечает (200 или 403 по коду)', reg.status === 200 || reg.status === 403, String(reg.status));
 check('  ответ содержит allow-origin', reg.headers.get('access-control-allow-origin') === ORIGIN, reg.headers.get('access-control-allow-origin'));
 
-// 3. Загрузка картинки из приложения.
+// 3. Загрузка картинки без токена: 401, но с CORS — приложение увидит причину.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC', 'base64');
-const regData = await reg.json();
 const media = await fetch(B + '/api/media', {
   method: 'POST',
-  headers: { 'content-type': 'image/png', 'x-token': regData.token, origin: ORIGIN },
+  headers: { 'content-type': 'image/png', 'x-token': 'no-such-token', origin: ORIGIN },
   body: png,
 });
-check('POST /api/media принимается', media.status === 200, String(media.status));
+check('POST /api/media без токена → 401', media.status === 401, String(media.status));
 check('  ответ содержит allow-origin', media.headers.get('access-control-allow-origin') === ORIGIN, media.headers.get('access-control-allow-origin'));
 
 // 4. Чужой origin не должен получать разрешение.
@@ -53,20 +53,8 @@ check('чужой origin не получает доступ', !enemy.headers.get
 const icon = await fetch(B + '/icon-192.png', { headers: { origin: ORIGIN } });
 check('иконки отдаются', icon.status === 200, String(icon.status));
 
-// Убираем тестовый аккаунт.
-const WebSocket = (await import('file:///C:/Users/setfators/Desktop/rust-messenger/cloudflare/node_modules/ws/index.js')).default;
-const ws = new WebSocket(B.replace('http', 'ws') + '/ws?token=' + encodeURIComponent(regData.token));
-await new Promise((resolve) => {
-  ws.on('message', (raw) => {
-    const m = JSON.parse(raw.toString());
-    if (m.t === 'hello') ws.send(JSON.stringify({ t: 'account_delete', password: 'parol123' }));
-    if (m.t === 'account_deleted') resolve();
-  });
-  ws.on('error', resolve);
-  setTimeout(resolve, 4000);
-});
-try { ws.close(); } catch (_) {}
-console.log('тестовый аккаунт удалён');
+// Тестовый аккаунт не создаётся: регистрация закрыта кодом, убирать нечего.
+console.log('проверка CORS завершена');
 
 console.log('\nпроблем: ' + problems.length);
 if (problems.length) process.exitCode = 1;

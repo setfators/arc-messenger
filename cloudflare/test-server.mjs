@@ -97,9 +97,26 @@ const userB = 'boris' + stamp;
 const userC = 'vera' + stamp;
 const regA = await api('/api/register', { name: userA, password: 'parolA1' });
 check('регистрация первого', regA.status === 200 && !!regA.data.token, JSON.stringify(regA.data));
-const regB = await api('/api/register', { name: userB, password: 'parolB1' });
-const regC = await api('/api/register', { name: userC, password: 'parolC1' });
-check('регистрация остальных', !!regB.data?.token && !!regC.data?.token);
+check('первый аккаунт становится владельцем', !!regA.data?.isOwner, JSON.stringify(regA.data));
+
+// Без кода приглашения дальше не пускают.
+const noInvite = await api('/api/register', { name: userB, password: 'parolB1' });
+check('без кода регистрация закрыта', noInvite.status === 403 && !!noInvite.data?.inviteRequired, JSON.stringify(noInvite.data));
+
+// Владелец создаёт код через WebSocket.
+const ownerSocket = await new Client('owner').open(regA.data.token);
+await ownerSocket.wait((m) => m.t === 'hello', 3000, 'hello владельца');
+ownerSocket.send({ t: 'invite_create', max: 5 });
+const created = await ownerSocket.wait((m) => m.t === 'invite_created', 3000, 'invite_created');
+const inviteCode = created && created.invite ? created.invite.code : '';
+check('владелец создаёт код приглашения', /^[A-Z0-9]{8}$/.test(inviteCode), String(inviteCode));
+
+const regB = await api('/api/register', { name: userB, password: 'parolB1', invite: inviteCode });
+const regC = await api('/api/register', { name: userC, password: 'parolC1', invite: inviteCode });
+check('регистрация по коду', !!regB.data?.token && !!regC.data?.token, JSON.stringify([regB.status, regC.status]));
+check('второй аккаунт уже не владелец', regB.data?.isOwner === false, JSON.stringify(regB.data?.isOwner));
+const wrongInvite = await api('/api/register', { name: 'gleb' + stamp, password: 'parolG1', invite: 'ZZZZZZZZ' });
+check('неверный код не пускает', wrongInvite.status === 403, String(wrongInvite.status));
 const dup = await api('/api/register', { name: userA.toUpperCase(), password: 'parolA1' });
 check('повторное имя (регистр) занято', dup.status === 400, JSON.stringify(dup.data));
 const badLogin = await api('/api/login', { name: userA, password: 'wrong' });

@@ -373,6 +373,13 @@
   .upd-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   .upd-note { font-size: 12px; opacity: .75; }
 
+/* Управление: коды приглашений */
+.invite-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.invite-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel2); }
+.invite-code { font-family: ui-monospace, Consolas, monospace; font-size: 15px; letter-spacing: .12em; color: var(--accent); }
+.invite-info { font-size: 12px; color: var(--muted); flex: 1; }
+.invite-row button { padding: 6px 12px; font-size: 13px; }
+
   /* ══════════════ 1.4.0: ответы, реакции, картинки, поиск, профиль ══════════════ */
   .main { position: relative; }
   .topbar .tb-btn {
@@ -527,6 +534,7 @@
     </div>
     <input id="authName" placeholder="Имя (2–20 символов)" maxlength="20" autocomplete="username">
     <input id="authPass" type="password" placeholder="Пароль" autocomplete="current-password">
+    <input id="authInvite" class="hidden" placeholder="Код приглашения" maxlength="16" autocomplete="off" style="text-transform:uppercase">
     <button class="primary" id="authGo">Войти</button>
     <div class="err" id="authErr"></div>
   </div>
@@ -628,6 +636,7 @@
       <button data-tab="stickers">Стикеры и эмодзи</button>
       <button data-tab="bridges">Мосты и сервер</button>
       <button data-tab="account">Аккаунт</button>
+  <button data-tab="manage" class="owner-only hidden">Управление</button>
     </div>
     <div class="settings-body" id="settingsBody"></div>
   </div>
@@ -709,6 +718,9 @@ function netSocket() {
 const store = {
   token: localStorage.getItem('token') || '',
   me: null,
+  isOwner: false,
+  inviteOnly: true,
+  invites: [],
   channels: [],
   room: 'obshiy',
   roomKind: 'channel',
@@ -946,16 +958,29 @@ $('authName').onkeydown = (e) => { if (e.key === 'Enter') $('authPass').focus();
 async function goAuth() {
   const name = $('authName').value.trim();
   const password = $('authPass').value;
+  const invite = ($('authInvite').value || '').trim().toUpperCase();
   if (!name || !password) { $('authErr').textContent = 'Введите имя и пароль'; return; }
   $('authGo').disabled = true;
   try {
+    const body = { name, password };
+    if (authMode === 'register' && invite) body.invite = invite;
     const res = await fetch(netUrl('/api/' + (authMode === 'login' ? 'login' : 'register')), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, password }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (!res.ok) { $('authErr').textContent = data.error || 'Не получилось'; return; }
+    if (!res.ok) {
+      // Сервер просит код приглашения — показываем поле и подсказку.
+      if (data.inviteRequired) {
+        $('authInvite').classList.remove('hidden');
+        $('authErr').textContent = 'Arc работает по приглашениям: вставьте код от владельца';
+        $('authInvite').focus();
+        return;
+      }
+      $('authErr').textContent = data.error || 'Не получилось';
+      return;
+    }
     store.token = data.token;
     localStorage.setItem('token', data.token);
     start();
@@ -1053,6 +1078,8 @@ function handle(data) {
   switch (data.t) {
     case 'hello': {
       store.me = data.me;
+      store.isOwner = !!data.isOwner;
+      store.inviteOnly = data.inviteOnly !== false;
       store.channels = data.channels || [];
       store.reconnectTries = 0;
       store.lastSeen = Date.now();
@@ -1293,6 +1320,20 @@ function handle(data) {
       toast(data.text || '');
       break;
     }
+    case 'invite_created': {
+      if (data.text) toast(data.text);
+      send({ t: 'invite_list' });
+      break;
+    }
+    case 'invite_list': {
+      store.invites = Array.isArray(data.invites) ? data.invites : [];
+      if (data.inviteOnly !== undefined) store.inviteOnly = !!data.inviteOnly;
+      if (settingsOpen() && currentTab === 'manage') renderSettings('manage');
+      break;
+    }
+    case 'export_ready': {
+      break;
+    }
   }
 }
 
@@ -1327,7 +1368,7 @@ function renderChannels() {
     };
     btn.appendChild(mic);
 
-    if (channel !== 'obshiy') {
+    if (channel !== 'obshiy' && store.isOwner) {
       const del = document.createElement('button');
       del.className = 'del';
       del.type = 'button';
@@ -1566,7 +1607,8 @@ function messageToolsNode(m, row) {
   reply.textContent = 'Ответить';
   reply.onclick = (event) => { event.stopPropagation(); setReply(m); };
   tools.appendChild(reply);
-  if (store.me && m.author === store.me.name && m.id) {
+  // Своё сообщение может удалить автор, любое — владелец.
+  if (store.me && m.id && (m.author === store.me.name || store.isOwner)) {
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'del-msg';
@@ -3409,6 +3451,119 @@ function tabAccount(body) {
   updateBlock(body);
 }
 
+/* --------------------------------------------------- управление (владелец) */
+function tabManage(body) {
+  body.appendChild(headBlock('Управление', 'Приглашения, модерация и резервная копия. Видит только владелец.'));
+  if (!store.isOwner) {
+    body.appendChild(el('p', 'hint', 'Этот раздел доступен только владельцу приложения.'));
+    return;
+  }
+
+  // 1. Режим регистрации.
+  const sectMode = el('div', 'sect');
+  sectMode.appendChild(el('h4', '', 'Кто может регистрироваться'));
+  addSwitch(sectMode, 'Только по приглашениям', 'Выключите, если хотите открытую регистрацию для всех', store.inviteOnly, (v) => {
+    send({ t: 'invite_only', enabled: v });
+  });
+  body.appendChild(sectMode);
+
+  // 2. Коды-приглашения.
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Коды приглашений'));
+  const row = mkRow('Новый код', 'Сколько человек сможет воспользоваться одним кодом');
+  const maxInput = document.createElement('input');
+  maxInput.type = 'number';
+  maxInput.min = '1';
+  maxInput.max = '50';
+  maxInput.value = '5';
+  maxInput.style.width = '90px';
+  const addBtn = el('button', 'primary', 'Создать код');
+  addBtn.type = 'button';
+  addBtn.onclick = () => send({ t: 'invite_create', max: Number(maxInput.value) || 5 });
+  row.append(maxInput, addBtn);
+  sect.appendChild(row);
+
+  const list = el('div', 'invite-list');
+  list.id = 'inviteList';
+  sect.appendChild(list);
+  body.appendChild(sect);
+  renderInvites(list);
+
+  // 3. Экспорт базы.
+  const sectData = el('div', 'sect');
+  sectData.appendChild(el('h4', '', 'Резервная копия'));
+  const rowExp = mkRow('Скачать базу', 'Файл с каналами, сообщениями, друзьями и профилями. Пароли и токены в него не попадают.');
+  const expBtn = el('button', 'primary', 'Скачать JSON');
+  expBtn.type = 'button';
+  expBtn.onclick = async () => {
+    expBtn.disabled = true;
+    try {
+      const res = await fetch(netUrl('/api/export'), { headers: { 'x-token': store.token } });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast(data.error || 'Экспорт не удался');
+        return;
+      }
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'arc-export-' + new Date().toISOString().slice(0, 10) + '.json';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 4000);
+      toast('Копия сохранена');
+    } catch (error) {
+      toast('Не удалось скачать базу');
+    } finally {
+      expBtn.disabled = false;
+    }
+  };
+  rowExp.appendChild(expBtn);
+  sectData.appendChild(rowExp);
+  body.appendChild(sectData);
+
+  // 4. Правила модерации — просто напоминание.
+  const sectRules = el('div', 'sect');
+  sectRules.appendChild(el('h4', '', 'Что может владелец'));
+  sectRules.appendChild(el('p', 'hint', 'Удалять любые сообщения (кнопка ✕ у сообщения) и любые каналы (✕ в списке каналов). Участники удаляют только свои сообщения, создавать каналы могут все, но не больше 10 в час.'));
+  body.appendChild(sectRules);
+
+  send({ t: 'invite_list' });
+}
+
+function renderInvites(container) {
+  const box = container || $('inviteList');
+  if (!box) return;
+  box.innerHTML = '';
+  const items = store.invites || [];
+  if (!items.length) {
+    box.appendChild(el('p', 'hint', 'Кодов пока нет. Создайте первый — и отправьте другу ссылку.'));
+    return;
+  }
+  const origin = SERVER || location.origin;
+  for (const item of items) {
+    const row = el('div', 'invite-row');
+    const code = el('code', 'invite-code', item.code);
+    const info = el('div', 'invite-info', 'использован ' + item.uses + ' из ' + item.max);
+    const copy = el('button', '', 'Скопировать ссылку');
+    copy.type = 'button';
+    copy.onclick = async () => {
+      const link = origin + '/?invite=' + item.code;
+      try {
+        await navigator.clipboard.writeText(link);
+        toast('Ссылка скопирована');
+      } catch (_) {
+        prompt('Скопируйте ссылку:', link);
+      }
+    };
+    const del = el('button', 'danger', 'Отозвать');
+    del.type = 'button';
+    del.onclick = () => send({ t: 'invite_revoke', code: item.code });
+    row.append(code, info, copy, del);
+    box.appendChild(row);
+  }
+}
+
 // Строка с текстовым полем в настройках: значение сохраняется сразу.
 function addText(parent, label, hint, value, onSave) {
   const row = mkRow(label, hint);
@@ -3535,7 +3690,12 @@ function renderSettings(tab) {
   document.querySelectorAll('.settings-nav button[data-tab]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.tab === currentTab);
   });
-  const tabs = { profile: tabProfile, appearance: tabAppearance, notify: tabNotify, privacy: tabPrivacy, voice: tabVoice, stickers: tabStickers, bridges: tabBridges, account: tabAccount };
+  // Вкладка управления видна только владельцу.
+  document.querySelectorAll('.owner-only').forEach((node) => {
+    node.classList.toggle('hidden', !store.isOwner);
+  });
+  const tabs = { profile: tabProfile, appearance: tabAppearance, notify: tabNotify, privacy: tabPrivacy, voice: tabVoice, stickers: tabStickers, bridges: tabBridges, account: tabAccount, manage: tabManage };
+  if (currentTab === 'manage' && !store.isOwner) currentTab = 'profile';
   (tabs[currentTab] || tabProfile)(body);
 }
 function openSettings(tab) {
@@ -4367,10 +4527,16 @@ if ($('callOpen')) $('callOpen').onclick = () => showCall();
 if ($('callClose')) $('callClose').onclick = () => hideCall();
 
 /* ------------------------------------------------------------------ старт */
+// Ссылка с приглашением: /?invite=CODE — сразу открываем регистрацию с кодом.
+const inviteFromLink = new URLSearchParams(location.search).get('invite');
+if (inviteFromLink && $('authInvite')) {
+  $('authInvite').value = inviteFromLink.trim().toUpperCase();
+  $('authInvite').classList.remove('hidden');
+}
 if (store.token) {
   start();
 } else {
-  setAuthMode('login');
+  setAuthMode(inviteFromLink ? 'register' : 'login');
 }
 </script>
 </body>

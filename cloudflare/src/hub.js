@@ -39,6 +39,17 @@ const TOKEN_PER_USER = 20;
 const AUTH_WINDOW = 5 * 60 * 1000;
 const AUTH_MAX_FAILS = 10;
 
+// Сценарий «для своих»: регистрация по кодам-приглашениям, владелец с правом
+// удалять чужое, ограничение частоты сообщений и экспорт базы.
+const INVITE_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const INVITE_CODE_LEN = 8;
+const INVITE_USES = 5;        // сколько человек можно позвать одним кодом
+const INVITE_LIMIT = 40;      // сколько кодов храним всего
+const MSG_BURST = 15;         // не больше 15 сообщений…
+const MSG_BURST_WINDOW = 10 * 1000;   // …за 10 секунд
+const MSG_HOURLY = 300;       // и не больше 300 в час
+const CREATE_HOURLY = 10;     // каналов в час на человека
+
 const COLORS = [
   '#5865f2', '#3ba55d', '#faa61a', '#ed4245', '#eb459e',
   '#00a8fc', '#9b59b6', '#e67e22', '#1abc9c', '#e91e63',
@@ -287,6 +298,20 @@ export class ChatHub {
         // Вложения-картинки (1.4.0) и подписки на Web Push.
         if (!this.store.media) this.store.media = {};
         if (!this.store.push) this.store.push = {};
+        // Сценарий «для своих»: владелец, коды-приглашения и режим закрытой регистрации.
+        if (!Array.isArray(this.store.invites)) this.store.invites = [];
+        if (this.store.inviteOnly === undefined) this.store.inviteOnly = true;
+        // Владелец — самый первый аккаунт. Если он удалён, права переходят
+        // к следующему по времени регистрации, иначе управлять будет некому.
+        if (!this.store.owner || !this.store.users[this.store.owner]) {
+          const all = Object.entries(this.store.users || {});
+          if (all.length) {
+            all.sort((a, b) => (a[1].created || 0) - (b[1].created || 0));
+            this.store.owner = all[0][0];
+          } else {
+            this.store.owner = '';
+          }
+        }
         // Старые аккаунты получают профиль и настройки при первом запуске.
         for (const u of Object.values(this.store.users || {})) {
           if (!u.profile) u.profile = defaultProfile(u.name, u.color);
@@ -398,6 +423,83 @@ export class ChatHub {
     if (!this.store.authFails || !this.store.authFails[addr]) return;
     delete this.store.authFails[addr];
     await this.save();
+  }
+
+  // ---------------------------------------------------------- ограничение частоты
+  // Простое окно на пользователя: сообщения (всплеск и час) и создание каналов.
+  isOwner(key) {
+    return !!this.store.owner && this.store.owner === key;
+  }
+
+  rateAllow(key, bucket, limit, windowMs) {
+    if (!this.store.rates) this.store.rates = {};
+    const mine = this.store.rates[key] || (this.store.rates[key] = {});
+    const stamp = now();
+    const slot = mine[bucket];
+    if (!slot || stamp >= slot.until) {
+      mine[bucket] = { n: 1, until: stamp + windowMs };
+      return { ok: true, retry: 0 };
+    }
+    if (slot.n >= limit) {
+      return { ok: false, retry: Math.max(1, Math.ceil((slot.until - stamp) / 1000)) };
+    }
+    slot.n += 1;
+    return { ok: true, retry: 0 };
+  }
+
+  // Проверяем два окна сразу: короткое (антифлуд) и часовое.
+  checkMessageRate(key) {
+    const burst = this.rateAllow(key, 'burst', MSG_BURST, MSG_BURST_WINDOW);
+    if (!burst.ok) return burst;
+    const hour = this.rateAllow(key, 'hour', MSG_HOURLY, 60 * 60 * 1000);
+    if (!hour.ok) return hour;
+    return { ok: true, retry: 0 };
+  }
+
+  // --------------------------------------------------------------- приглашения
+  newInviteCode() {
+    let code = '';
+    const bytes = crypto.getRandomValues(new Uint8Array(INVITE_CODE_LEN));
+    for (const b of bytes) code += INVITE_CODE_CHARS[b % INVITE_CODE_CHARS.length];
+    return code;
+  }
+
+  inviteView(item) {
+    return {
+      code: item.code,
+      uses: item.uses || 0,
+      max: item.max || INVITE_USES,
+      created: item.created || 0,
+      by: item.by || '',
+      usedBy: Array.isArray(item.usedBy) ? item.usedBy : [],
+    };
+  }
+
+  // Экспорт базы для бэкапа: всё, кроме хэшей паролей и токенов.
+  exportView() {
+    const users = {};
+    for (const [k, u] of Object.entries(this.store.users || {})) {
+      users[k] = {
+        name: u.name,
+        color: u.color,
+        created: u.created,
+        friends: u.friends || [],
+        incoming: u.incoming || [],
+        outgoing: u.outgoing || [],
+        profile: u.profile || null,
+        settings: u.settings || null,
+      };
+    }
+    return {
+      exported: now(),
+      version: APP_VERSION,
+      owner: this.store.owner || '',
+      inviteOnly: !!this.store.inviteOnly,
+      channels: this.store.channels,
+      users,
+      rooms: this.store.rooms,
+      invites: (this.store.invites || []).map((i) => this.inviteView(i)),
+    };
   }
 
   // Утилиты
@@ -947,6 +1049,27 @@ export class ChatHub {
       });
     }
 
+    // Экспорт базы (бэкап): только владелец, токен в x-token.
+    if (url.pathname === '/export' && request.method === 'GET') {
+      const token = String(request.headers.get('x-token') || '').trim();
+      const owner = token ? this.store.tokens[token] : '';
+      if (!owner || !this.store.users[owner]) {
+        return new Response(JSON.stringify({ error: 'Нужен вход' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+      if (!this.isOwner(owner)) {
+        return new Response(JSON.stringify({ error: 'Экспорт доступен только владельцу' }), {
+          status: 403,
+          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+      return new Response(JSON.stringify(this.exportView(), null, 2), {
+        headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
+
     if (url.pathname === '/auth') return this.handleAuth(request, url);
 
     if ((request.headers.get('Upgrade') || '').toLowerCase() === 'websocket') {
@@ -977,6 +1100,22 @@ export class ChatHub {
 
     if (action === 'register') {
       if (existing) return fail('Такое имя уже занято');
+
+      // Регистрация «для своих»: первый аккаунт становится владельцем и
+      // заводится свободно, остальным нужен код-приглашение.
+      const hasUsers = Object.keys(this.store.users).length > 0;
+      let invite = null;
+      if (hasUsers && this.store.inviteOnly) {
+        const code = String(body.invite || '').trim().toUpperCase();
+        invite = code ? (this.store.invites || []).find((i) => i.code === code && (i.uses || 0) < (i.max || INVITE_USES)) : null;
+        if (!invite) {
+          return new Response(JSON.stringify({ error: 'Нужен код приглашения', inviteRequired: true }), {
+            status: 403,
+            headers: { 'content-type': 'application/json; charset=utf-8' },
+          });
+        }
+      }
+
       const salt = randomHex(16);
       const color = colorFor(name);
       const user = {
@@ -994,9 +1133,15 @@ export class ChatHub {
         settings: defaultSettings(),
       };
       this.store.users[key] = user;
+      if (!hasUsers) this.store.owner = key;
+      if (invite) {
+        invite.uses = (invite.uses || 0) + 1;
+        invite.usedBy = Array.isArray(invite.usedBy) ? invite.usedBy : [];
+        invite.usedBy.push(name);
+      }
       const token = this.mintToken(key);
       await this.save();
-      return new Response(JSON.stringify({ token, name: user.name, color: user.color }), {
+      return new Response(JSON.stringify({ token, name: user.name, color: user.color, isOwner: this.store.owner === key }), {
         headers: { 'content-type': 'application/json; charset=utf-8' },
       });
     }
@@ -1043,6 +1188,10 @@ export class ChatHub {
       t: 'hello',
       version: APP_VERSION,
       pushKey: this.store.vapid ? this.store.vapid.pub || '' : '',
+      // Права этого аккаунта и режим регистрации — клиент показывает по ним
+      // вкладку управления и подсказки на экране входа.
+      isOwner: this.store.owner === key,
+      inviteOnly: !!this.store.inviteOnly,
       me: {
         name: user.name,
         color: user.color,
@@ -1148,6 +1297,12 @@ export class ChatHub {
       const pair = dmPartners(room);
       const isDm = pair ? pair[0] === key || pair[1] === key : false;
       if (!isChannel && !isDm) return;
+      // Антифлуд: иначе один человек за минуту забьёт всю историю канала.
+      const rate = this.checkMessageRate(key);
+      if (!rate.ok) {
+        this.sendTo(key, { t: 'error', text: 'Слишком часто. Подождите ' + rate.retry + ' с.' });
+        return;
+      }
       // Личка подчиняется настройке получателя «только от друзей».
       if (pair) {
         const otherKey = pair[0] === key ? pair[1] : pair[0];
@@ -1383,10 +1538,12 @@ export class ChatHub {
       if (!list || !id) return;
       const idx = list.findIndex((m) => m.id === id);
       if (idx < 0) return;
-      if (String(list[idx].author).toLowerCase() !== name.toLowerCase()) {
+      if (String(list[idx].author).toLowerCase() !== name.toLowerCase() && !this.isOwner(key)) {
         this.sendTo(key, { t: 'error', text: 'Удалять можно только свои сообщения' });
         return;
       }
+      const wasMine = String(list[idx].author).toLowerCase() === name.toLowerCase();
+      const authorName = String(list[idx].author || '');
       list.splice(idx, 1);
       await this.save();
       const event = { t: 'msg_delete', room, id };
@@ -1397,6 +1554,84 @@ export class ChatHub {
       } else {
         this.broadcast(event);
       }
+      // Владелец удалил чужое — автору сообщения говорим об этом прямо.
+      if (!wasMine && authorName) {
+        const authorKey = normalizeName(authorName);
+        if (authorKey !== key) {
+          this.sendTo(authorKey, { t: 'notice', text: 'Владелец удалил ваше сообщение' });
+        }
+      }
+      return;
+    }
+
+    // ------------------------------------------------------- управление (владелец)
+    if (kind === 'invite_create') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Приглашения создаёт владелец' });
+        return;
+      }
+      if (!Array.isArray(this.store.invites)) this.store.invites = [];
+      if (this.store.invites.length >= INVITE_LIMIT) {
+        this.sendTo(key, { t: 'error', text: 'Кодов уже ' + INVITE_LIMIT + ' — удалите ненужные' });
+        return;
+      }
+      const max = Math.min(50, Math.max(1, Number(value.max) || INVITE_USES));
+      const item = { code: this.newInviteCode(), by: name, created: now(), uses: 0, max, usedBy: [] };
+      this.store.invites.push(item);
+      await this.save();
+      const origin = 'https://rust-messenger.sg530507.workers.dev';
+      this.sendTo(key, {
+        t: 'invite_created',
+        invite: this.inviteView(item),
+        text: 'Код готов: ' + item.code + ' · ссылка ' + origin + '/?invite=' + item.code,
+      });
+      return;
+    }
+
+    if (kind === 'invite_list') {
+      if (!this.isOwner(key)) return;
+      this.sendTo(key, {
+        t: 'invite_list',
+        invites: (this.store.invites || []).map((i) => this.inviteView(i)),
+        inviteOnly: !!this.store.inviteOnly,
+      });
+      return;
+    }
+
+    if (kind === 'invite_revoke') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Это может только владелец' });
+        return;
+      }
+      const code = String(value.code || '').trim().toUpperCase();
+      const before = (this.store.invites || []).length;
+      this.store.invites = (this.store.invites || []).filter((i) => i.code !== code);
+      if (this.store.invites.length === before) return;
+      await this.save();
+      this.sendTo(key, { t: 'invite_list', invites: this.store.invites.map((i) => this.inviteView(i)), inviteOnly: !!this.store.inviteOnly });
+      this.sendTo(key, { t: 'notice', text: 'Код ' + code + ' отозван' });
+      return;
+    }
+
+    if (kind === 'invite_only') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Это может только владелец' });
+        return;
+      }
+      this.store.inviteOnly = !!value.enabled;
+      await this.save();
+      this.sendTo(key, { t: 'invite_list', invites: (this.store.invites || []).map((i) => this.inviteView(i)), inviteOnly: !!this.store.inviteOnly });
+      this.sendTo(key, { t: 'notice', text: this.store.inviteOnly ? 'Регистрация только по кодам' : 'Регистрация открыта всем' });
+      return;
+    }
+
+    if (kind === 'export_all') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Экспорт доступен только владельцу' });
+        return;
+      }
+      const data = this.exportView();
+      this.sendTo(key, { t: 'export_ready', data });
       return;
     }
 
@@ -1638,6 +1873,11 @@ export class ChatHub {
 
     if (kind === 'channel_delete') {
       const room = String(value.room || '').trim();
+      // Каналы удаляет только владелец: иначе первый же участник снесёт общий чат.
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Удалять каналы может только владелец' });
+        return;
+      }
       if (!room || room === DEFAULT_CHANNEL) {
         this.sendTo(key, { t: 'error', text: 'Общий канал удалить нельзя' });
         return;
@@ -1658,6 +1898,12 @@ export class ChatHub {
     if (kind === 'create') {
       const raw = String(value.room || '').trim().toLowerCase();
       const room = [...raw].filter((c) => /[a-z0-9_-]/.test(c)).slice(0, 24).join('');
+      // Каналы создавать могут все, но не чаще, чем позволяет лимит.
+      const rate = this.rateAllow(key, 'create', CREATE_HOURLY, 60 * 60 * 1000);
+      if (!rate.ok) {
+        this.sendTo(key, { t: 'error', text: 'Слишком много новых каналов. Подождите ' + rate.retry + ' с.' });
+        return;
+      }
       if (room.length < 2) {
         this.sendTo(key, { t: 'error', text: 'Название канала: латиница, 2–24 символа' });
         return;
