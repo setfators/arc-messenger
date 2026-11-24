@@ -11,6 +11,8 @@ const DEFAULT_CHANNEL = 'obshiy';
 
 // Групповой звонок: столько человек одновременно в одном голосовом канале.
 const VOICE_LIMIT = 8;
+// Сколько держится приглашение в личку, прежде чем считаем, что не ответили.
+const CALL_RING_MS = 60000;
 // Картинки лежат в storage самого Durable Object: аватар — до 512 КБ,
 // стикер — до 256 КБ (в base64 это примерно на треть больше).
 const AVATAR_MAX_BYTES = 512 * 1024;
@@ -283,6 +285,8 @@ export class ChatHub {
     this.env = env;
     this.store = null;
     this.voice = new Map(); // room -> Map(name -> {name, muted})
+    // Активные вызовы в личках: room -> { from, to, ts }.
+    this.calls = new Map();
     this.loading = null;
   }
 
@@ -292,8 +296,12 @@ export class ChatHub {
       this.loading = (async () => {
         const saved = await this.state.storage.get('state');
         this.store = saved || emptyStore();
-        if (!this.store.channels.includes(DEFAULT_CHANNEL)) this.store.channels.push(DEFAULT_CHANNEL);
-        if (!this.store.rooms[DEFAULT_CHANNEL]) this.store.rooms[DEFAULT_CHANNEL] = [];
+        // Общий канал больше не навязывается: если владелец его удалил, он
+        // не должен воскресать. Чиним только то, что канал есть в списке,
+        // а комнаты для него нет (например, после ручного вмешательства).
+        for (const room of this.store.channels) {
+          if (!Array.isArray(this.store.rooms[room])) this.store.rooms[room] = [];
+        }
         if (!this.store.hidden) this.store.hidden = {};
         if (!this.store.avatars) this.store.avatars = {};
         if (!this.store.tokenAt) this.store.tokenAt = {};
@@ -1112,6 +1120,25 @@ export class ChatHub {
     };
   }
 
+  // Голосовать можно в канале и в личке со своим собеседником.
+  voiceJoinAllowed(key, room) {
+    if (this.store.channels.includes(room)) return true;
+    const pair = dmPartners(room);
+    return !!pair && (pair[0] === key || pair[1] === key);
+  }
+
+  // Состояние звонка в канале видят все, в личке — только двое участников:
+  // иначе по рассылке можно было бы узнать, кто с кем говорит.
+  broadcastVoice(room) {
+    const state = this.voiceState(room);
+    const pair = dmPartners(room);
+    if (!pair) {
+      this.broadcast(state);
+      return;
+    }
+    for (const who of pair) this.sendTo(who, state);
+  }
+
   voiceRemove(name) {
     let left = null;
     for (const [room, members] of this.voice) {
@@ -1404,6 +1431,24 @@ export class ChatHub {
     server.send(JSON.stringify({ t: 'dm_list', items: this.dmList(key) }));
     server.send(JSON.stringify({ t: 'sticker_pack', items: this.stickerPackView() }));
     server.send(JSON.stringify(this.friendsView(key)));
+    // Если человеку звонят, а приложение только что открылось — сразу
+    // показываем входящий вызов, иначе приглашение потеряется.
+    for (const [room, call] of this.calls) {
+      if (String(call.to).toLowerCase() !== user.name.toLowerCase()) continue;
+      if (now() - call.ts > CALL_RING_MS) {
+        this.calls.delete(room);
+        continue;
+      }
+      const pair = dmPartners(room);
+      const fromKey = pair ? (pair[0] === key ? pair[1] : pair[0]) : '';
+      const caller = fromKey ? this.store.users[fromKey] : null;
+      server.send(JSON.stringify({
+        t: 'call_incoming',
+        room,
+        from: call.from,
+        fromProfile: caller ? this.profileView(caller) : null,
+      }));
+    }
     this.broadcast(this.presencePayload());
 
     return new Response(null, { status: 101, webSocket: client });
@@ -1918,6 +1963,31 @@ export class ChatHub {
       return;
     }
 
+    // Редактирование своего сообщения: текст можно исправить, историю — нет.
+    if (kind === 'msg_edit') {
+      const room = String(value.room || '');
+      const id = Number(value.id);
+      const text = String(value.text || '').trim();
+      const list = this.store.rooms[room] || [];
+      const idx = list.findIndex((m) => m && m.id === id);
+      if (idx < 0) return;
+      const message = list[idx];
+      if (String(message.author).toLowerCase() !== name.toLowerCase()) {
+        this.sendTo(key, { t: 'error', text: 'Исправить можно только своё сообщение' });
+        return;
+      }
+      if (this.isMuted(user) || user.banned) {
+        this.sendTo(key, { t: 'error', text: 'Пока нельзя: действует ограничение' });
+        return;
+      }
+      if (!text || [...text].length > MAX_TEXT_CHARS) return;
+      message.text = text;
+      message.edited = now();
+      await this.save();
+      this.broadcast({ t: 'msg_edit', room, id, text, edited: message.edited });
+      return;
+    }
+
     // ------------------------------------------------ сотрудники и модерация
     if (kind === 'staff_list') {
       if (!this.canModerate(key)) return;
@@ -2284,16 +2354,14 @@ export class ChatHub {
         this.sendTo(key, { t: 'error', text: 'Удалять каналы может только владелец' });
         return;
       }
-      if (!room || room === DEFAULT_CHANNEL) {
-        this.sendTo(key, { t: 'error', text: 'Общий канал удалить нельзя' });
-        return;
-      }
+      // Удалить можно любой канал, включая общий: он больше не воссоздаётся.
+      if (!room) return;
       if (!this.store.channels.includes(room)) return;
       this.store.channels = this.store.channels.filter((c) => c !== room);
       delete this.store.rooms[room];
       if (this.voice.has(room)) {
         this.voice.delete(room);
-        this.broadcast(this.voiceState(room));
+        this.broadcastVoice(room);
       }
       await this.save();
       this.broadcast({ t: 'channels', channels: this.store.channels });
@@ -2392,9 +2460,10 @@ export class ChatHub {
 
     if (kind === 'voice_join') {
       const room = String(value.room || '');
-      if (!this.store.channels.includes(room)) return;
+      // Канал или личка со своим собеседником — больше нигде голоса нет.
+      if (!this.voiceJoinAllowed(key, room)) return;
       const old = this.voiceRemove(name);
-      if (old) this.broadcast(this.voiceState(old));
+      if (old) this.broadcastVoice(old);
       if (!this.voice.has(room)) this.voice.set(room, new Map());
       const members = this.voice.get(room);
       // Групповой звонок до VOICE_LIMIT человек: дальше не пускаем.
@@ -2404,13 +2473,82 @@ export class ChatHub {
         return;
       }
       members.set(name, { name, muted: false, screen: false });
-      this.broadcast(this.voiceState(room));
+      this.broadcastVoice(room);
+      return;
+    }
+
+    // ------------------------------------------------- звонок в личку (1.4.3)
+    // Звонок — это приглашение, а не мгновенный вход в голос: собеседник
+    // должен согласиться. Пока он думает, у звонившего идёт «звоним…».
+    if (kind === 'call_start') {
+      const room = String(value.room || '');
+      const pair = dmPartners(room);
+      if (!pair || !pair.includes(key)) return;
+      const otherKey = pair[0] === key ? pair[1] : pair[0];
+      const other = this.store.users[otherKey];
+      if (!other) {
+        this.sendTo(key, { t: 'error', text: 'Собеседник не найден' });
+        return;
+      }
+      // Себя занятым считаем тоже: в двух звонках одновременно не посидишь.
+      const myRoom = this.voiceRoomOf(name);
+      if (myRoom && myRoom !== room) {
+        this.sendTo(key, { t: 'error', text: 'Вы уже в звонке' });
+        return;
+      }
+      if (this.voiceRoomOf(other.name)) {
+        this.sendTo(key, { t: 'call_busy', room, name: other.name });
+        return;
+      }
+      // Уже звоним этому человеку — второй раз не трезвоним.
+      const active = this.calls.get(room);
+      if (active && now() - active.ts < CALL_RING_MS) {
+        this.sendTo(key, { t: 'call_ringing', room });
+        return;
+      }
+      this.calls.set(room, { from: name, to: other.name, ts: now() });
+      this.sendTo(otherKey, {
+        t: 'call_incoming',
+        room,
+        from: name,
+        fromProfile: this.profileView(user),
+      });
+      this.sendTo(key, { t: 'call_ringing', room, name: other.name });
+      return;
+    }
+
+    if (kind === 'call_accept' || kind === 'call_decline' || kind === 'call_cancel') {
+      const room = String(value.room || '');
+      const pair = dmPartners(room);
+      if (!pair || !pair.includes(key)) return;
+      const call = this.calls.get(room);
+      if (!call) return;
+      const otherKey = pair[0] === key ? pair[1] : pair[0];
+      const otherName = this.store.users[otherKey] ? this.store.users[otherKey].name : '';
+      if (kind === 'call_accept') {
+        // Согласился только тот, кому звонят; звонивший «принять» не может.
+        if (call.to.toLowerCase() !== name.toLowerCase()) return;
+        this.calls.delete(room);
+        this.sendTo(otherKey, { t: 'call_accepted', room, by: name });
+        this.sendTo(key, { t: 'call_answered', room });
+        return;
+      }
+      if (kind === 'call_decline') {
+        if (call.to.toLowerCase() !== name.toLowerCase()) return;
+        this.calls.delete(room);
+        this.sendTo(otherKey, { t: 'call_declined', room, by: name });
+        this.sendTo(key, { t: 'call_ended', room });
+        return;
+      }
+      // Отмена: звонивший передумал, либо собеседник не ответил вовремя.
+      this.calls.delete(room);
+      this.sendTo(otherKey, { t: 'call_cancelled', room, by: name });
       return;
     }
 
     if (kind === 'voice_leave') {
       const room = this.voiceRemove(name);
-      if (room) this.broadcast(this.voiceState(room));
+      if (room) this.broadcastVoice(room);
       return;
     }
 
@@ -2425,7 +2563,7 @@ export class ChatHub {
           }
         }
       }
-      for (const room of rooms) this.broadcast(this.voiceState(room));
+      for (const room of rooms) this.broadcastVoice(room);
       return;
     }
 
@@ -2441,7 +2579,7 @@ export class ChatHub {
           rooms.push(room);
         }
       }
-      for (const room of rooms) this.broadcast(this.voiceState(room));
+      for (const room of rooms) this.broadcastVoice(room);
       return;
     }
 
@@ -2655,10 +2793,29 @@ export class ChatHub {
       const others = meta.key ? this.sockets(meta.key).filter((s) => s !== ws).length : 0;
       if (!others) {
         const room = this.voiceRemove(name);
-        if (room) this.broadcast(this.voiceState(room));
+        if (room) this.broadcastVoice(room);
+        // Ушёл посреди звонка — снимаем приглашение и говорим второму.
+        this.dropCallsOf(name);
       }
     }
     this.broadcast(this.presencePayload());
+  }
+
+  // Снимаем все звонки, где человек звонил или ждал ответа.
+  dropCallsOf(name) {
+    if (!this.calls.size) return;
+    const low = String(name).toLowerCase();
+    for (const [room, call] of [...this.calls]) {
+      const fromLow = String(call.from).toLowerCase();
+      const toLow = String(call.to).toLowerCase();
+      if (fromLow !== low && toLow !== low) continue;
+      this.calls.delete(room);
+      const other = fromLow === low ? call.to : call.from;
+      const key = String(other).toLowerCase();
+      if (this.store.users[key]) {
+        this.sendTo(key, { t: 'call_cancelled', room, by: name });
+      }
+    }
   }
 
   async webSocketError(ws) {

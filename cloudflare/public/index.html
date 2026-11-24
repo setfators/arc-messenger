@@ -454,6 +454,21 @@
   .file-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-size { font-size: 12px; opacity: .68; margin-top: 1px; }
   .file-dl { font-size: 17px; opacity: .65; flex: 0 0 auto; }
+  .edit-msg { opacity: .6; }
+  .edit-msg:hover { opacity: 1; }
+  /* Пометка «изменено» рядом с исправленным текстом. */
+  .edited-mark { margin-left: 6px; font-size: 11px; opacity: .55; font-style: italic; }
+  /* Окно звонка в личке. */
+  .call-box { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); backdrop-filter: blur(2px); }
+  .call-box.hidden { display: none; }
+  .call-card { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 26px 30px; min-width: 260px; border-radius: 18px; background: var(--panel,#1c1f24); border: 1px solid var(--line,rgba(127,127,127,.3)); box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+  .call-ava { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; background: var(--acc,#4a6cf7); color: #fff; }
+  .call-name { font-size: 17px; font-weight: 600; }
+  .call-status { font-size: 13px; opacity: .7; }
+  .call-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .call-btn { padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line,rgba(127,127,127,.3)); background: transparent; color: inherit; cursor: pointer; font-size: 14px; }
+  .call-btn.ok { background: var(--ok,#2e9e5b); border-color: transparent; color: #fff; }
+  .call-btn.danger { background: var(--danger,#c9443f); border-color: transparent; color: #fff; }
   .att-img {
     max-width: min(360px, 100%); max-height: 320px; border-radius: 10px; display: block;
     cursor: zoom-in; background: var(--panel2); object-fit: contain;
@@ -591,6 +606,7 @@
       <div class="tt" id="topTitle"># obshiy</div>
       <div class="pill" id="connState">подключение…</div>
       <button class="tb-btn" id="searchBtn" type="button" title="Поиск по истории">🔍</button>
+      <button class="tb-btn hidden" id="callBtn" type="button" title="Позвонить">📞</button>
     </header>
     <div class="messages" id="messages"></div>
     <div class="typing" id="typing"></div>
@@ -1145,7 +1161,10 @@ function handle(data) {
       }
       updateTitle();
       if (store.roomKind === 'channel' && store.room && store.channels.indexOf(store.room) < 0) {
-        openRoom(store.channels[0] || 'obshiy', 'channel', '# ' + (store.channels[0] || 'obshiy'));
+        // Канал удалили: переходим к первому оставшемуся. Если каналов нет
+        // вовсе (владелец удалил даже общий) — показываем пустое состояние.
+        if (store.channels.length) openRoom(store.channels[0], 'channel', '# ' + store.channels[0]);
+        else showNoChannels();
       } else {
         renderChannels();
       }
@@ -1392,6 +1411,81 @@ function handle(data) {
       });
       break;
     }
+    case 'msg_edit': {
+      // Правим текст на месте, если сообщение сейчас на экране.
+      const row = data && data.id != null ? document.querySelector('.msg[data-id="' + data.id + '"]') : null;
+      if (row) {
+        const body = row.querySelector('.body');
+        if (body) {
+          body.textContent = data.text || '';
+          const mark = el('span', 'edited-mark', 'изменено');
+          mark.title = 'Сообщение изменено';
+          body.appendChild(mark);
+        }
+      }
+      // Правка сохраняется в истории, чтобы не пропала при смене канала.
+      for (const list of Object.values(store.messages || {})) {
+        const target = (list || []).find((one) => one && one.id === data.id);
+        if (target) { target.text = data.text || ''; target.edited = data.edited || Date.now(); }
+      }
+      break;
+    }
+    case 'call_incoming': {
+      incomingCall(data);
+      break;
+    }
+    case 'call_ringing': {
+      // У звонившего «Звоним…» уже показано — обновляем имя, если пришло.
+      if (store.call && store.call.kind === 'outgoing') {
+        if (data && data.name) store.call.peer = data.name;
+        const st = $('callStatus');
+        if (st) st.textContent = 'Звоним…';
+      }
+      break;
+    }
+    case 'call_busy': {
+      if (store.call && store.call.kind === 'outgoing') {
+        store.call = null;
+        hideCallBox();
+        toast((data && data.name ? displayNameOf(data.name) + ' сейчас' : 'Собеседник') + ' уже в звонке');
+      }
+      break;
+    }
+    case 'call_accepted':
+    case 'call_answered': {
+      // Собеседник согласился — соединяем. В эту личку.
+      const room = data && data.room;
+      if (room) {
+        if (store.call) store.call = null;
+        hideCallBox();
+        if (store.room === room) {
+          joinVoice(room);
+        } else {
+          // Звонок принят, а мы тем временем переключились — открываем личку.
+          const peer = data && data.by ? data.by : callPeerName(room);
+          openRoom(room, 'dm', '@ ' + displayNameOf(peer), peer);
+          setTimeout(() => joinVoice(room), 120);
+        }
+      }
+      break;
+    }
+    case 'call_declined':
+    case 'call_ended': {
+      if (store.call && store.call.kind === 'outgoing') {
+        store.call = null;
+        hideCallBox();
+        toast('Звонок отклонён');
+      }
+      break;
+    }
+    case 'call_cancelled': {
+      // Звонивший передумал или отключился — снимаем входящее окно.
+      if (store.call && store.call.kind === 'incoming') {
+        store.call = null;
+        hideCallBox();
+      }
+      break;
+    }
   }
 }
 
@@ -1399,6 +1493,10 @@ function handle(data) {
 function renderChannels() {
   const box = $('channels');
   box.innerHTML = '';
+  if (!store.channels.length) {
+    // Каналов нет — подсказываем, что делать, вместо пустого списка.
+    box.appendChild(el('div', 'empty', 'Каналов нет — создайте первый'));
+  }
   for (const channel of store.channels) {
     const btn = document.createElement('button');
     btn.className = 'chan' + (store.roomKind === 'channel' && store.room === channel ? ' active' : '');
@@ -1500,12 +1598,40 @@ function renderChannels() {
   renderVoiceBox();
 }
 
+// Каналов не осталось: некуда писать, показываем подсказку.
+function showNoChannels() {
+  store.room = null;
+  store.roomKind = 'channel';
+  store.roomTitle = 'Каналы';
+  store.roomPeer = null;
+  const title = $('topTitle');
+  if (title) title.textContent = 'Каналов нет';
+  const box = $('messages');
+  if (box) {
+    box.innerHTML = '';
+    box.classList.remove('hidden');
+    box.appendChild(el('div', 'empty', 'Каналов нет. Нажмите «+ создать канал» слева — и можно писать.'));
+  }
+  const composer = $('composer');
+  if (composer) composer.classList.add('hidden');
+  const callBtn = $('callBtn');
+  if (callBtn) callBtn.classList.add('hidden');
+  renderChannels();
+}
+
 function openRoom(room, kind, title, peerName) {
   store.room = room || null;
   store.roomKind = kind;
   store.roomTitle = title;
   store.roomPeer = peerName || null;
   $('topTitle').textContent = title;
+  // Кнопка звонка есть только в личке: в канале голос включается из панели.
+  const callBtn = $('callBtn');
+  if (callBtn) {
+    const show = kind === 'dm' && !!peerName;
+    callBtn.classList.toggle('hidden', !show);
+    callBtn.onclick = show ? startDmCall : null;
+  }
   $('friendsPane').classList.add('hidden');
   $('messages').classList.remove('hidden');
   $('composer').classList.remove('hidden');
@@ -1707,6 +1833,22 @@ function messageToolsNode(m, row) {
   tools.appendChild(reply);
   // Своё сообщение удаляет автор, чужое — сотрудник или владелец.
   if (store.me && m.id && (m.author === store.me.name || store.isStaff)) {
+    // Правка — только у своего текста: чужие слова исправлять нельзя.
+    if (m.author === store.me.name && m.text) {
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'edit-msg';
+      edit.title = 'Изменить сообщение';
+      edit.textContent = '✎';
+      edit.onclick = async () => {
+        const next = await openDialog({ title: 'Изменить сообщение', text: 'Исправленный текст увидят все участники.', input: true, value: m.text, ok: 'Сохранить' });
+        if (next == null) return;
+        const text = String(next).trim();
+        if (!text || text === m.text) return;
+        send({ t: 'msg_edit', room: m.room, id: m.id, text });
+      };
+      tools.appendChild(edit);
+    }
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'del-msg';
@@ -1775,6 +1917,12 @@ function buildMessageRow(m) {
     }
   } else {
     body.textContent = m.text || '';
+  }
+  // Пометка «изменено» рядом с исправленным текстом.
+  if (m.edited) {
+    const mark = el('span', 'edited-mark', 'изменено');
+    mark.title = 'Сообщение изменено';
+    body.appendChild(mark);
   }
   col.appendChild(body);
 
@@ -2089,6 +2237,7 @@ $('navFriends').onclick = () => {
   $('messages').classList.add('hidden');
   $('composer').classList.add('hidden');
   $('topTitle').textContent = 'Друзья';
+        var cb = $('callBtn'); if (cb) cb.classList.add('hidden');
   $('navFriends').classList.add('active');
   $('navChannels').classList.remove('active');
   $('side').classList.remove('open');
@@ -2367,11 +2516,11 @@ async function joinVoice(room) {
   store.voiceUsers = [{ name: store.me.name, muted: false }];
   renderVoiceBox();
   send({ t: 'voice_join', room });
-  toast('Вы в голосовом канале ' + room);
+  // В личке не говорим «канал»: там это звонок.
+  toast(dmPartnersOf(room) ? 'Звонок начался' : 'Вы в голосовом канале ' + room);
 }
 
-function leaveVoice(silent) {
-  if (!store.voiceRoom) return;
+function leaveVoice(silent) {  if (!store.voiceRoom) return;
   // Показ экрана не должен жить после выхода из канала.
   if (store.screenOn || store.screenStream) stopScreen(true);
   send({ t: 'voice_leave' });
@@ -3086,7 +3235,13 @@ function tabNotify(body) {
   // Web Push: уведомление приходит, даже когда приложение закрыто.
   const sect4 = el('div', 'sect');
   sect4.appendChild(el('h4', '', 'При закрытом приложении'));
-  if (!pushSupported()) {
+  if (insideNativeShell()) {
+    // В APK фоновых уведомлений нет: WebView не умеет Web Push. Говорим честно
+    // и предлагаем установить версию из браузера, где push работает.
+    sect4.appendChild(el('p', 'hint',
+      'В приложении из APK фоновых уведомлений нет — этого не умеет встроенный браузер Android. ' +
+      'Чтобы получать их, откройте сайт в Chrome и установите приложение оттуда: меню ⋮ → «Установить приложение».'));
+  } else if (!pushSupported()) {
     sect4.appendChild(el('p', 'hint', 'Этот браузер не умеет фоновые уведомления — они будут приходить, только когда вкладка открыта.'));
   } else {
     addSwitch(sect4, 'Фоновые уведомления', 'Приходят, даже когда мессенджер закрыт. Работает на телефоне и в установленном приложении.', pushEnabledPref(), (v) => {
@@ -3107,6 +3262,28 @@ function tabNotify(body) {
     if ('Notification' in window && Notification.permission === 'denied') {
       sect4.appendChild(el('p', 'hint', 'Уведомления запрещены в настройках сайта — разрешите их в браузере, чтобы включить фоновые.'));
     }
+  }
+  // Установка как приложение: в установленной версии push работает надёжнее.
+  if (!insideNativeShell() && !appInstalled()) {
+    const row = mkRow('Установить как приложение', 'Иконка на главном экране, отдельное окно и надёжные уведомления');
+    if (store.installPrompt) {
+      const btn = el('button', 'primary', 'Установить');
+      btn.type = 'button';
+      btn.onclick = async () => {
+        const prompt = store.installPrompt;
+        store.installPrompt = null;
+        try {
+          prompt.prompt();
+          const choice = await prompt.userChoice;
+          if (choice && choice.outcome === 'accepted') toast('Готово: приложение установлено');
+        } catch (error) { /* пользователь отказался */ }
+        if (settingsOpen()) renderSettings('notify');
+      };
+      row.appendChild(btn);
+    } else {
+      row.appendChild(el('span', 'hint', 'В меню браузера выберите «Установить приложение»'));
+    }
+    sect4.appendChild(row);
   }
   body.appendChild(sect4);
 }
@@ -4651,7 +4828,157 @@ document.querySelectorAll('.ep-tab').forEach((b) => {
   b.onclick = () => selectEmojiTab(b.dataset.ep);
 });
 
-/* ------------------------------------------------------------------ звонок и показ экрана */
+/* ------------------------------------------------------------------ звонок в личку */
+// Личка по id комнаты: 'dm:a|b' -> [a, b], иначе null.
+function dmPartnersOf(room) {
+  if (!room || room.indexOf('dm:') !== 0) return null;
+  const rest = room.slice(3);
+  const cut = rest.indexOf('|');
+  if (cut < 0) return null;
+  return [rest.slice(0, cut), rest.slice(cut + 1)];
+}
+
+// Окно звонка: «звоним…» у звонившего и «вам звонят» у получателя.
+function callBox() {
+  let box = $('callBox');
+  if (box) return box;
+  box = document.createElement('div');
+  box.id = 'callBox';
+  box.className = 'call-box hidden';
+  const card = document.createElement('div');
+  card.className = 'call-card';
+  const avatar = document.createElement('div');
+  avatar.className = 'call-ava';
+  avatar.id = 'callAva';
+  const title = document.createElement('div');
+  title.className = 'call-name';
+  title.id = 'callName';
+  const status = document.createElement('div');
+  status.className = 'call-status';
+  status.id = 'callStatus';
+  const actions = document.createElement('div');
+  actions.className = 'call-actions';
+  actions.id = 'callActions';
+  card.append(avatar, title, status, actions);
+  box.appendChild(card);
+  document.body.appendChild(box);
+  return box;
+}
+
+let callRingTimer = null;
+function stopCallRing() {
+  if (callRingTimer) { clearInterval(callRingTimer); callRingTimer = null; }
+}
+function hideCallBox() {
+  const box = $('callBox');
+  if (box) box.classList.add('hidden');
+  stopCallRing();
+  if (store.callTimer) { clearTimeout(store.callTimer); store.callTimer = null; }
+}
+
+// opts: { name, status, actions: [{ label, kind, onClick }] }
+function showCallBox(opts) {
+  const box = callBox();
+  const o = opts || {};
+  $('callAva').textContent = String(o.name || '?').replace(/^./, (ch) => ch.toUpperCase()).slice(0, 1);
+  $('callName').textContent = o.name || '';
+  $('callStatus').textContent = o.status || '';
+  const actions = $('callActions');
+  actions.innerHTML = '';
+  for (const action of o.actions || []) {
+    const btn = el('button', 'call-btn ' + (action.kind || ''), action.label);
+    btn.type = 'button';
+    btn.onclick = action.onClick;
+    actions.appendChild(btn);
+  }
+  box.classList.remove('hidden');
+}
+
+function callPeerName(room) {
+  const pair = dmPartnersOf(room);
+  if (!pair || !store.me) return store.roomPeer || '';
+  const mine = String(store.me.name).toLowerCase();
+  return pair[0].toLowerCase() === mine ? pair[1] : pair[0];
+}
+
+// Позвонить человеку из открытой лички.
+async function startDmCall() {
+  if (!store.room || store.roomKind !== 'dm') return;
+  if (store.voiceRoom) { toast('Вы уже в звонке — сначала завершите текущий'); return; }
+  if (!window.RTCPeerConnection) { toast('Браузер не поддерживает звонки'); return; }
+  try {
+    await ensureMic();
+  } catch (error) {
+    toast('Микрофон недоступен: ' + (error && error.message ? error.message : 'нет доступа'));
+    return;
+  }
+  const room = store.room;
+  const peer = store.roomPeer || callPeerName(room);
+  store.call = { room, kind: 'outgoing', peer };
+  send({ t: 'call_start', room });
+  showCallBox({
+    name: displayNameOf(peer),
+    status: 'Звоним…',
+    actions: [{ label: 'Отменить', kind: 'danger', onClick: () => cancelDmCall() }],
+  });
+  // Если за 45 секунд не ответили — снимаем приглашение сами.
+  store.callTimer = setTimeout(() => {
+    if (!store.call) return;
+    send({ t: 'call_cancel', room });
+    store.call = null;
+    hideCallBox();
+    toast('Не ответили');
+  }, 45000);
+}
+
+function cancelDmCall() {
+  const call = store.call;
+  store.call = null;
+  if (call) send({ t: 'call_cancel', room: call.room });
+  hideCallBox();
+}
+
+function declineIncomingCall() {
+  const call = store.call;
+  store.call = null;
+  if (call) send({ t: 'call_decline', room: call.room });
+  hideCallBox();
+}
+
+async function acceptIncomingCall() {
+  const call = store.call;
+  if (!call) return;
+  store.call = null;
+  hideCallBox();
+  await joinVoice(call.room);
+  send({ t: 'call_accept', room: call.room });
+}
+
+// Входящий звонок: показываем окно и звоним, пока не ответят.
+function incomingCall(data) {
+  if (!data || !data.room) return;
+  // Уже в звонке — сразу вежливо отказываем, чтобы не висело.
+  if (store.voiceRoom) {
+    send({ t: 'call_decline', room: data.room });
+    return;
+  }
+  const name = data.from || callPeerName(data.room);
+  store.call = { room: data.room, kind: 'incoming', peer: name };
+  showCallBox({
+    name: displayNameOf(name, data.fromProfile),
+    status: 'Входящий звонок',
+    actions: [
+      { label: 'Принять', kind: 'ok', onClick: () => acceptIncomingCall() },
+      { label: 'Отклонить', kind: 'danger', onClick: () => declineIncomingCall() },
+    ],
+  });
+  stopCallRing();
+  const beep = () => { try { tonePlay(); } catch (_) { /* без звука не страшно */ } };
+  beep();
+  callRingTimer = setInterval(beep, 2200);
+}
+
+
 function showCall() {
   const stage = $('callStage');
   if (!stage) return;
@@ -4675,6 +5002,21 @@ function updateScreenBtn() {
 // список экранов и окон рисуем сами из desktopCapturer.
 function desktopBridge() {
   return window.messengerDesktop && window.messengerDesktop.isDesktop ? window.messengerDesktop : null;
+}
+
+// Внутри APK: страница лежит на устройстве и обращается к серверу по адресу,
+// который вписывается при сборке. Нужно, чтобы честно предупредить об
+// отсутствии фоновых уведомлений в WebView.
+function insideNativeShell() {
+  return Boolean(window.__ARC_SERVER__) || Boolean(window.Capacitor && window.Capacitor.isNativePlatform);
+}
+
+// Приложение уже открыто как установленное (PWA), а не во вкладке.
+function appInstalled() {
+  try {
+    if (window.matchMedia('(display-mode: standalone)').matches) return true;
+  } catch (_) { /* старый браузер */ }
+  return Boolean(navigator.standalone);
 }
 
 function pickScreenSource() {
