@@ -145,6 +145,71 @@
   .msg .body { white-space: pre-wrap; word-break: break-word; }
   .empty { color: var(--muted); font-size: 14px; padding: 8px 2px; }
 
+  /* ---------- экран знакомства 1.6.0 ---------- */
+  .welcome {
+    flex: 1; overflow-y: auto; display: flex; align-items: center; justify-content: center;
+    padding: 22px 18px 28px;
+  }
+  .welcome.hidden { display: none; }
+  .wc-card {
+    width: min(680px, 100%); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 18px; padding: 26px 26px 22px; box-shadow: 0 24px 60px rgba(0,0,0,.35);
+  }
+  .wc-badge {
+    display: inline-grid; place-items: center; width: 42px; height: 42px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), #7c8bff); color: #fff;
+    font-weight: 800; font-size: 15px; margin-bottom: 12px;
+  }
+  .wc-card h2 { margin: 0 0 6px; font-size: 22px; }
+  .wc-sub { margin: 0 0 18px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+  .wc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+  .wc-feat { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .wc-feat b { display: block; font-size: 13.5px; margin: 6px 0 4px; }
+  .wc-feat i { display: block; font-style: normal; color: var(--muted); font-size: 12px; line-height: 1.45; }
+  .wc-ico { font-size: 18px; }
+  .wc-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 20px; }
+  .wc-preview {
+    border: 1px solid var(--line); border-radius: 12px; background: #1b1d22;
+    padding: 10px 12px; margin-bottom: 12px;
+  }
+  .wc-chan {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted);
+    padding-bottom: 8px; border-bottom: 1px solid var(--line); margin-bottom: 10px;
+  }
+  .wc-chan .lock { font-size: 11px; }
+  .wc-chan-name { font-weight: 600; color: var(--text); }
+  .wc-chan .cnt { margin-left: auto; font-size: 11px; }
+  .wc-msg { display: flex; gap: 8px; padding: 4px 0; }
+  .wc-ava {
+    width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff;
+    font-size: 11px; display: grid; place-items: center; flex: 0 0 22px; font-weight: 700;
+  }
+  .wc-msg b { font-size: 12.5px; display: block; }
+  .wc-msg p { margin: 1px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+  .wc-hint { margin: 0; color: var(--muted); font-size: 11.5px; }
+  @media (max-width: 560px) {
+    .welcome { align-items: flex-start; padding: 14px 12px 22px; }
+    .wc-card { padding: 20px 16px 18px; border-radius: 14px; }
+    .wc-grid { grid-template-columns: 1fr; }
+    .wc-preview { display: none; }
+    .wc-actions .primary, .wc-actions .pill { flex: 1 1 auto; }
+  }
+
+  /* ---------- счётчики в «Управлении» 1.6.0 ---------- */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 4px 0 12px; }
+  .stat { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .stat-num { font-size: 20px; font-weight: 700; line-height: 1.2; }
+  .stat-label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .stat-sub { font-size: 11px; color: var(--muted); opacity: .85; margin-top: 4px; }
+  .stats-bars { display: flex; align-items: flex-end; gap: 6px; height: 74px; margin: 6px 0 8px; }
+  .stat-bar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 4px; }
+  .stat-bar-fill {
+    width: 100%; max-width: 34px; background: linear-gradient(180deg, var(--accent), #7c8bff);
+    border-radius: 4px 4px 2px 2px; min-height: 4px;
+  }
+  .stat-bar-day { font-size: 10px; color: var(--muted); }
+  .stats-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
   .friends { flex: 1; overflow-y: auto; padding: 18px; }
   .friends-head { display: flex; gap: 8px; margin-bottom: 14px; }
   .friends-head input {
@@ -645,6 +710,42 @@
       <button class="tb-btn" id="searchBtn" type="button" title="Поиск по истории">🔍</button>
       <button class="tb-btn hidden" id="callBtn" type="button" title="Позвонить">📞</button>
     </header>
+    <div class="welcome hidden" id="welcome">
+      <div class="wc-card">
+        <div class="wc-badge">Arc</div>
+        <h2>Добро пожаловать в Arc</h2>
+        <p class="wc-sub">Приватный мессенджер для своих: личные сообщения, собственные каналы, голос и файлы.</p>
+        <div class="wc-grid">
+          <div class="wc-feat">
+            <span class="wc-ico">🔒</span>
+            <b>Свои каналы</b>
+            <i>Канал видите только вы и те, кого вы позвали. Никаких общих чатов.</i>
+          </div>
+          <div class="wc-feat">
+            <span class="wc-ico">📞</span>
+            <b>Звонки в личке</b>
+            <i>Позвонить другу можно в один клик — прямо из переписки.</i>
+          </div>
+          <div class="wc-feat">
+            <span class="wc-ico">📎</span>
+            <b>Файлы и поиск</b>
+            <i>Картинки, файлы до 10 МБ, реакции и поиск по истории.</i>
+          </div>
+        </div>
+        <div class="wc-actions">
+          <button class="primary" id="wcDemo" type="button">Открыть демо-канал</button>
+          <button class="pill" id="wcFriend" type="button">Добавить друга</button>
+          <button class="pill" id="wcCreate" type="button">Создать канал</button>
+        </div>
+        <div class="wc-preview" aria-hidden="true">
+          <div class="wc-chan"><span class="lock">🔒</span><span class="wc-chan-name"># Добро пожаловать</span><span class="cnt">1</span></div>
+          <div class="wc-msg"><span class="wc-ava">A</span><div><b>Arc</b><p>Это ваш собственный канал — его видите только вы.</p></div></div>
+          <div class="wc-msg"><span class="wc-ava">A</span><div><b>Arc</b><p>Кнопка 👥 в шапке — позвать друга, он сразу увидит канал.</p></div></div>
+          <div class="wc-msg"><span class="wc-ava">A</span><div><b>Arc</b><p>Личные сообщения — проще всего начать с них.</p></div></div>
+        </div>
+        <p class="wc-hint">Личные сообщения — слева, под «Друзьями» 👥. Демо-канал можно удалить в его панели.</p>
+      </div>
+    </div>
     <div class="messages" id="messages"></div>
     <div class="typing" id="typing"></div>
     <div class="search-pane hidden" id="searchPane">
@@ -802,7 +903,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -826,6 +927,7 @@ const store = {
   isStaff: false,
   role: 'member',
   staff: { owner: null, staff: [], banned: [] },
+  stats: null,
   backups: { items: [], lastBackup: '', keep: 7 },
   inviteOnly: true,
   invites: [],
@@ -1228,10 +1330,20 @@ function handle(data) {
       if (store.roomKind === 'channel' && store.room && store.channels.indexOf(store.room) < 0) {
         store.room = null;
       }
-      // Если ничего не открыто, а свои каналы есть — открываем первый.
+      // Возвращаемся в последний канал. Новому человеку показываем экран
+      // знакомства: демо-канал откроется по кнопке, а не сам.
       if (!store.room) {
-        if (store.channels.length) openRoom(store.channels[0], 'channel', '# ' + channelTitleOf(store.channels[0]));
-        else showNoChannels();
+        let last = '';
+        try { last = localStorage.getItem('lastRoom') || ''; } catch (_) { last = ''; }
+        const first = store.channels[0] || '';
+        const firstInfo = first ? channelByRoom(first) : null;
+        if (last && store.channels.indexOf(last) >= 0) {
+          openRoom(last, 'channel', '# ' + channelTitleOf(last));
+        } else if (first && !(firstInfo && firstInfo.demo)) {
+          openRoom(first, 'channel', '# ' + channelTitleOf(first));
+        } else {
+          showNoChannels();
+        }
       }
       if (params.get('settings')) setTimeout(() => openSettings(currentTab), 60);
       if (store.room) send({ t: 'join', room: store.room });
@@ -1495,6 +1607,11 @@ function handle(data) {
       renderStaff();
       break;
     }
+    case 'stats': {
+      store.stats = data.stats || null;
+      if (settingsOpen() && currentTab === 'manage') renderStats();
+      break;
+    }
     case 'role_changed': {
       store.isOwner = !!data.isOwner;
       store.isStaff = !!data.isStaff;
@@ -1724,20 +1841,21 @@ function renderChannels() {
   renderVoiceBox();
 }
 
-// Ни один канал не открыт: показываем подсказку, а личные чаты остаются слева.
+// Ни один чат не открыт: показываем экран знакомства, а личные чаты остаются слева.
 function showNoChannels() {
   store.room = null;
   store.roomKind = 'channel';
-  store.roomTitle = 'Каналы';
+  store.roomTitle = 'Arc';
   store.roomPeer = null;
   const title = $('topTitle');
   if (title) title.textContent = 'Arc';
   const box = $('messages');
   if (box) {
     box.innerHTML = '';
-    box.classList.remove('hidden');
-    box.appendChild(el('div', 'empty', 'Выберите чат слева. Личные сообщения работают как обычно, а канал можно создать кнопкой «+ создать канал» — его увидите только вы и те, кого вы позовёте.'));
+    box.classList.add('hidden');
   }
+  const welcome = $('welcome');
+  if (welcome) welcome.classList.remove('hidden');
   const composer = $('composer');
   if (composer) composer.classList.add('hidden');
   const callBtn = $('callBtn');
@@ -1771,11 +1889,16 @@ function openRoom(room, kind, title, peerName) {
     membersBtn.onclick = isChan ? () => openChannelPanel(room) : null;
   }
   $('friendsPane').classList.add('hidden');
+  $('welcome').classList.add('hidden');
   $('messages').classList.remove('hidden');
   $('composer').classList.remove('hidden');
   $('navFriends').classList.remove('active');
   $('navChannels').classList.add('active');
   $('side').classList.remove('open');
+  // Запоминаем последний канал: после перезагрузки человек вернётся туда же.
+  if (kind === 'channel' && room) {
+    try { localStorage.setItem('lastRoom', room); } catch (_) {}
+  }
   closeSearchPanel();
   closeReactionPicker();
   clearReply();
@@ -1815,9 +1938,11 @@ function renderChannelPanel() {
   const one = channelByRoom(room);
   if (!one) { closeChannelPanel(); return; }
   $('chanTitle').textContent = '# ' + (one.title || room);
-  $('chanSub').textContent = one.mine
-    ? 'Вы создатель канала. Его видят только участники — позовите друзей.'
-    : 'Приватный канал. Создатель: ' + (one.owner || '—');
+  $('chanSub').textContent = one.demo
+    ? 'Демо-канал: короткая экскурсия по Arc. Его видите только вы — удалите, когда освоитесь.'
+    : one.mine
+      ? 'Вы создатель канала. Его видят только участники — позовите друзей.'
+      : 'Приватный канал. Создатель: ' + (one.owner || '—');
   $('chanCount').textContent = '· ' + (one.count || 1);
   const list = $('chanMembersList');
   list.innerHTML = '';
@@ -1919,6 +2044,11 @@ $('chanDelete').onclick = async () => {
   });
   if (ok) { send({ t: 'channel_delete', room }); closeChannelPanel(); }
 };
+
+/* ------------------------------------------------- экран знакомства 1.6.0 */
+$('wcDemo').onclick = () => send({ t: 'demo_open' });
+$('wcFriend').onclick = () => $('navFriends').onclick();
+$('wcCreate').onclick = () => $('newChannel').click();
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '😮', '😢'];
 
@@ -3929,7 +4059,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.5.0.apk');
+  apkLink.setAttribute('download', 'Arc-1.6.0.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';
@@ -4006,13 +4136,89 @@ function tabAccount(body) {
   updateBlock(body);
 }
 
+/* --------------------------------------------------- счётчики 1.6.0 */
+function renderStats() {
+  const box = $('statsGrid');
+  if (!box) return;
+  const bars = $('statsBars');
+  const s = store.stats;
+  box.innerHTML = '';
+  if (bars) bars.innerHTML = '';
+  if (!s) {
+    box.appendChild(el('p', 'hint', 'Считаю…'));
+    return;
+  }
+  const card = (num, label, sub) => {
+    const one = el('div', 'stat');
+    one.appendChild(el('div', 'stat-num', String(num)));
+    one.appendChild(el('div', 'stat-label', label));
+    if (sub) one.appendChild(el('div', 'stat-sub', sub));
+    return one;
+  };
+  const users = s.users || {};
+  const messages = s.messages || {};
+  const channels = s.channels || {};
+  const dms = s.dms || {};
+  const media = s.media || {};
+  box.append(
+    card(users.total || 0, 'пользователей', (users.online || 0) + ' онлайн'),
+    card(messages.total || 0, 'сообщений', 'за сутки ' + (messages.day || 0)),
+    card(channels.total || 0, 'каналов', 'участий: ' + (channels.memberships || 0)),
+    card(dms.rooms || 0, 'личных чатов', 'за сутки ' + (dms.messagesDay || 0) + ' сообщ.'),
+    card(users.newWeek || 0, 'новых за неделю', 'сегодня ' + (users.newToday || 0)),
+    card(media.count || 0, 'вложений', humanSize(media.bytes || 0))
+  );
+  if (bars && Array.isArray(s.signups) && s.signups.length) {
+    const max = Math.max(1, ...s.signups.map((day) => day.count || 0));
+    for (const day of s.signups) {
+      const col = el('div', 'stat-bar');
+      const fill = el('div', 'stat-bar-fill');
+      fill.style.height = Math.max(4, Math.round(((day.count || 0) / max) * 100)) + '%';
+      col.appendChild(fill);
+      col.appendChild(el('span', 'stat-bar-day', String(day.date || '').slice(5).replace('-', '.')));
+      col.title = day.date + ': ' + (day.count || 0) + ' новых';
+      bars.appendChild(col);
+    }
+  }
+  const note = $('statsNote');
+  if (note) {
+    const invites = s.invites || {};
+    const moderation = s.moderation || {};
+    const backups = s.backups || {};
+    note.textContent = 'Коды: ' + (invites.active || 0) + ' активных · сотрудников: ' + (moderation.staff || 0) +
+      ' · забанено: ' + (moderation.banned || 0) + ' · копия: ' + (backups.last || '—');
+  }
+}
+
 /* --------------------------------------------------- управление (владелец) */
 function tabManage(body) {
-  body.appendChild(headBlock('Управление', 'Приглашения, модерация и резервная копия. Видит только владелец.'));
+  body.appendChild(headBlock('Управление', 'Статистика, приглашения, модерация и резервная копия. Видит только владелец.'));
   if (!store.isOwner) {
     body.appendChild(el('p', 'hint', 'Этот раздел доступен только владельцу приложения.'));
     return;
   }
+
+  // 0. Счётчики: сколько людей, сообщений, каналов и вложений.
+  const sectStats = el('div', 'sect');
+  sectStats.appendChild(el('h4', '', 'Статистика'));
+  const statsBox = el('div', 'stats-grid');
+  statsBox.id = 'statsGrid';
+  sectStats.appendChild(statsBox);
+  const statsBars = el('div', 'stats-bars');
+  statsBars.id = 'statsBars';
+  sectStats.appendChild(statsBars);
+  const statsFoot = el('div', 'stats-foot');
+  const statsRefresh = el('button', 'pill', 'Обновить');
+  statsRefresh.type = 'button';
+  statsRefresh.onclick = () => send({ t: 'stats_get' });
+  statsFoot.appendChild(statsRefresh);
+  const statsNote = el('span', 'hint', 'Считает сервер: люди, сообщения, каналы и вложения.');
+  statsNote.id = 'statsNote';
+  statsFoot.appendChild(statsNote);
+  sectStats.appendChild(statsFoot);
+  body.appendChild(sectStats);
+  renderStats();
+  send({ t: 'stats_get' });
 
   // 1. Режим регистрации.
   const sectMode = el('div', 'sect');

@@ -35,7 +35,13 @@ const owner = await api('/api/register', { name: 'chm' + stamp, password: 'parol
 if (!owner.data || !owner.data.token) { console.log('\nБаза не пустая: нужен свежий --persist-to.'); process.exit(2); }
 const ows = await open(owner.data.token);
 const hello = await waitFor(ows, (m) => m.t === 'hello');
-check('новый сервер не создаёт общих каналов', !!hello && (hello.channels || []).length === 0, JSON.stringify(hello && hello.channels));
+check('новому человеку создаётся демо-канал',
+  !!(hello && (hello.channels || []).length === 1
+    && (hello.channelItems || []).some((i) => i.demo && i.title === 'Добро пожаловать')),
+  JSON.stringify(hello && { c: hello.channels, items: hello.channelItems }));
+check('общих каналов нет: демо-канал принадлежит только создателю',
+  !!(hello && (hello.channelItems || []).length === 1 && (hello.channelItems[0] || {}).mine === true),
+  JSON.stringify(hello && hello.channelItems));
 
 // 1. Свой канал создаётся и сразу виден только создателю.
 const title = 'мои дела ' + stamp;
@@ -74,7 +80,10 @@ try { again.ws.close(); } catch (_) {}
 ows.ws.send(JSON.stringify({ t: 'channel_delete', room }));
 const list3 = await waitFor(ows, (m) => m.t === 'channels' && !(m.channels || []).includes(room));
 check('канал удаляется', !!list3, JSON.stringify(list3 && list3.channels));
-check('каналов не осталось', !!(list3 && (list3.channels || []).length === 0), JSON.stringify(list3 && list3.channels));
+// Демо-канал, выданный при регистрации, остаётся: удаляли только свой.
+check('демо-канал после удаления остался',
+  !!(list3 && (list3.channels || []).length === 1 && (list3.items || []).some((i) => i.demo)),
+  JSON.stringify(list3 && list3.items));
 
 // 6. В удалённый канал писать нельзя.
 ows.ws.send(JSON.stringify({ t: 'msg', room, text: 'в никуда' }));
@@ -89,7 +98,8 @@ const invite = await (async () => {
 const member = await api('/api/register', { name: 'chp' + stamp, password: 'parol123', invite: invite.invite.code });
 const mws = await open(member.data.token);
 const mHello = await waitFor(mws, (m) => m.t === 'hello');
-check('другой аккаунт не видит чужой канал', !!(mHello && (mHello.channels || []).length === 0),
+check('другой аккаунт не видит чужой канал',
+  !!(mHello && !(mHello.channels || []).includes(room) && (mHello.channels || []).length === 1),
   JSON.stringify(mHello && mHello.channels));
 ows.ws.send(JSON.stringify({ t: 'create', room: 'main' + stamp, title: 'main' + stamp }));
 const created2 = await waitFor(ows, (m) => m.t === 'channel_created' && m.room && m.room !== room);

@@ -4,7 +4,7 @@
 
 import { mxDefault, mxNorm, mxPublic, mxSend, mxSync, mxWhoami } from './matrix.js';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const HISTORY_LIMIT = 300;
 const MAX_TEXT_CHARS = 4000;
 // Приватные каналы (1.5.0): канал виден только создателю и тем, кого он позвал.
@@ -1239,6 +1239,7 @@ export class ChatHub {
       ownerKey: meta ? String(meta.owner || '') : '',
       mine: !!meta && meta.owner === viewerKey,
       legacy: !!(meta && meta.legacy),
+      demo: !!(meta && meta.demo),
       members: people,
       count: people.length,
       created: meta ? meta.created || 0 : 0,
@@ -1296,6 +1297,129 @@ export class ChatHub {
     const list = this.store.rooms[room];
     list.push(message);
     while (list.length > HISTORY_LIMIT) list.shift();
+  }
+
+  // ------------------------------------------------- знакомство 1.6.0
+  // Новому человеку сразу есть что почитать: личный демо-канал с коротким
+  // объяснением, как всё устроено. Канал его собственный — можно удалить,
+  // переименовать или позвать друзей, как любой другой.
+  demoTutorial() {
+    return [
+      'Здравствуйте! Это демо-канал: короткая экскурсия по Arc. Он ваш — переименуйте, удалите или позовите друзей, когда захотите.',
+      'Каналы здесь приватные. Этот канал видите только вы. Кнопка 👥 в шапке — позвать друга: он сразу увидит канал и переписку.',
+      'Проще всего начать с личных сообщений: слева «Личные сообщения», а друзья добавляются в разделе 👥 «Друзья». В личке есть кнопка 📞 — звонок в один клик.',
+      'Можно отвечать цитатой, ставить реакции, отправлять картинки и файлы до 10 МБ, искать по истории 🔍. Всё это работает и в канале, и в личке.',
+      'Готово! Создайте свой канал кнопкой «+ создать канал» или начните с личных сообщений. Приятного общения.',
+    ];
+  }
+
+  // Ищем демо-канал человека и создаём, если его ещё нет.
+  ensureDemoChannel(key) {
+    const user = this.store.users[key];
+    if (!user) return null;
+    for (const room of this.store.channels || []) {
+      const meta = this.channelMeta(room);
+      if (meta && meta.demo && meta.owner === key) return room;
+    }
+    const room = this.freeChannelRoom('start');
+    this.store.channels.push(room);
+    this.store.rooms[room] = [];
+    this.store.channelMeta[room] = {
+      owner: key,
+      members: [key],
+      title: 'Добро пожаловать',
+      created: now(),
+      demo: true,
+    };
+    for (const text of this.demoTutorial()) {
+      this.store.seq = (this.store.seq || 0) + 1;
+      this.pushMessage(room, {
+        id: this.store.seq,
+        room,
+        author: 'Arc',
+        text,
+        ts: now(),
+        external: 'demo',
+        authorProfile: { displayName: 'Arc', color: '#5865f2', avatar: '', avatarUrl: '', bio: '' },
+      });
+    }
+    return room;
+  }
+
+  // Счётчики для вкладки «Управление»: считается по состоянию, без внешней
+  // аналитики. Обход истории линейный, но история короткая (300 на комнату).
+  statsPayload() {
+    const users = Object.values(this.store.users || {});
+    const stamp = now();
+    const dayAgo = stamp - 24 * 60 * 60 * 1000;
+    const weekAgo = stamp - 7 * 24 * 60 * 60 * 1000;
+    const signupByDay = {};
+    for (const user of users) {
+      const created = Number(user.created) || 0;
+      if (created < weekAgo) continue;
+      const date = this.backupDate(created);
+      signupByDay[date] = (signupByDay[date] || 0) + 1;
+    }
+    const days = [];
+    for (let i = 6; i >= 0; i -= 1) {
+      const date = this.backupDate(stamp - i * 24 * 60 * 60 * 1000);
+      days.push({ date, count: signupByDay[date] || 0 });
+    }
+    const newWeek = days.reduce((sum, day) => sum + day.count, 0);
+    const newToday = days[days.length - 1].count;
+
+    let messages = 0;
+    let messagesDay = 0;
+    let dmRooms = 0;
+    let dmMessagesDay = 0;
+    for (const [room, list] of Object.entries(this.store.rooms || {})) {
+      if (!Array.isArray(list)) continue;
+      const isDm = !!dmPartners(room);
+      if (isDm) dmRooms += 1;
+      for (const message of list) {
+        if (!message) continue;
+        messages += 1;
+        if ((message.ts || 0) < dayAgo) continue;
+        messagesDay += 1;
+        if (isDm) dmMessagesDay += 1;
+      }
+    }
+
+    let mediaCount = 0;
+    let mediaBytes = 0;
+    for (const meta of Object.values(this.store.media || {})) {
+      mediaCount += 1;
+      mediaBytes += Number(meta && meta.size) || 0;
+    }
+
+    const channels = this.store.channels || [];
+    const memberships = channels.reduce((sum, room) => sum + this.channelMembers(room).length, 0);
+    const invites = this.store.invites || [];
+    const inviteUses = invites.reduce((sum, item) => sum + (Number(item.uses) || 0), 0);
+    const activeInvites = invites.filter((item) => (Number(item.uses) || 0) < (Number(item.max) || INVITE_USES)).length;
+    const muted = users.filter((user) => this.isMuted(user)).length;
+    const banned = Object.keys(this.store.banned || {}).length;
+
+    return {
+      t: 'stats',
+      stats: {
+        generatedAt: stamp,
+        version: APP_VERSION,
+        users: { total: users.length, online: this.onlineNames().length, newToday, newWeek, banned, muted },
+        messages: { total: messages, day: messagesDay },
+        channels: { total: channels.length, memberships, demo: channels.filter((room) => (this.channelMeta(room) || {}).demo).length },
+        dms: { rooms: dmRooms, messagesDay: dmMessagesDay },
+        media: { count: mediaCount, bytes: mediaBytes, limitBytes: MEDIA_TOTAL_BYTES },
+        invites: { codes: invites.length, active: activeInvites, uses: inviteUses },
+        moderation: { staff: (this.store.staff || []).length, banned },
+        backups: { last: this.store.lastBackup || '', keep: BACKUP_KEEP },
+        storage: {
+          rooms: Object.keys(this.store.rooms || {}).length,
+          tokens: Object.keys(this.store.tokens || {}).length,
+        },
+        signups: days,
+      },
+    };
   }
 
   voiceRoomOf(name) {
@@ -1538,6 +1662,9 @@ export class ChatHub {
         invite.usedBy = Array.isArray(invite.usedBy) ? invite.usedBy : [];
         invite.usedBy.push(name);
       }
+      // Новому человеку сразу даём демо-канал с экскурсией: пустой мессенджер
+      // без единого сообщения выглядит сломанным.
+      this.ensureDemoChannel(key);
       const token = this.mintToken(key);
       await this.save();
       return new Response(JSON.stringify({ token, name: user.name, color: user.color, isOwner: this.store.owner === key }), {
@@ -2028,6 +2155,16 @@ export class ChatHub {
     }
 
     // ------------------------------------------------------- бэкапы и пароли
+    // Счётчики для вкладки «Управление»: только владелец.
+    if (kind === 'stats_get') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Статистика доступна только владельцу' });
+        return;
+      }
+      this.sendTo(key, this.statsPayload());
+      return;
+    }
+
     if (kind === 'backup_list') {
       if (!this.isOwner(key)) {
         this.sendTo(key, { t: 'error', text: 'Резервные копии доступны только владельцу' });
@@ -2741,6 +2878,18 @@ export class ChatHub {
       await this.save();
       this.broadcastChannels();
       this.sendChannel(room, { t: 'notice', text: 'Канал переименован: #' + title });
+      return;
+    }
+
+    // Кнопка «Открыть демо-канал» на экране знакомства. Повторное нажатие
+    // возвращает тот же канал, а не плодит новые.
+    if (kind === 'demo_open') {
+      const room = this.ensureDemoChannel(key);
+      if (!room) return;
+      await this.save();
+      this.sendChannels(key);
+      this.sendTo(key, { t: 'history', room, messages: this.store.rooms[room] || [] });
+      this.sendTo(key, { t: 'channel_created', room });
       return;
     }
 

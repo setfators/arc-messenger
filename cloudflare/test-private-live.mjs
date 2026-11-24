@@ -44,7 +44,9 @@ check('два временных аккаунта созданы', !!(guest.data
 const ows = await open(owner.data.token);
 const gws = await open(guest.data.token);
 await waitFor(ows, (m) => m.t === 'hello');
+const oHello = await waitFor(ows, (m) => m.t === 'hello');
 await waitFor(gws, (m) => m.t === 'hello');
+check('новому аккаунту выдан демо-канал', !!(oHello && (oHello.channelItems || []).some((i) => i.demo)), JSON.stringify(oHello && oHello.channels));
 
 try {
   const title = 'проверка ' + stamp;

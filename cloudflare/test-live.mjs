@@ -7,7 +7,7 @@ console.log('/health:', health.status, await health.text());
 const page = await fetch(B + '/');
 const html = await page.text();
 console.log('страница:', page.status, 'байт', html.length);
-for (const marker of ["APP_VERSION = '1.5.0'", 'msg_react', 'search_messages', 'push_subscribe', '/api/media', 'openUserCard', 'tabAccount', 'channel_add', 'openChannelPanel']) {
+for (const marker of ["APP_VERSION = '1.6.0'", 'msg_react', 'search_messages', 'push_subscribe', '/api/media', 'openUserCard', 'tabAccount', 'channel_add', 'openChannelPanel']) {
   console.log('  маркер', marker, '=', html.includes(marker));
 }
 

@@ -269,7 +269,7 @@ if (toDelete) {
 }
 
 // --- версия 1.4.0: реакции, ответы, картинки, поиск, push --------------------
-check('hello знает версию 1.5.x', !!(helloA && /^1\.5\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
+check('hello знает версию 1.6.x', !!(helloA && /^1\.6\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
 check('hello отдаёт VAPID-ключ', !!(helloA && typeof helloA.pushKey === 'string' && helloA.pushKey.length > 40),
   helloA && String(helloA.pushKey).slice(0, 20));
 

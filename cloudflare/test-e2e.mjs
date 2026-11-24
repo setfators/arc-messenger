@@ -97,9 +97,16 @@ const texts = (s) => [...doc.querySelectorAll(s)].map((n) => n.textContent.trim(
 
 await sleep(1200);
 check('клиент подключился к серверу', $('#auth').classList.contains('hidden') && !$('#app').classList.contains('hidden'), 'auth=' + $('#auth').className);
-check('каналов пока нет — показана подсказка', texts('#channels .empty').join(' ').includes('Создайте канал'), texts('#channels .empty').join('|'));
+check('новому человеку показан экран знакомства', !!$('#welcome') && !$('#welcome').classList.contains('hidden'), '');
+check('в списке есть демо-канал', texts('#channels .nm').includes('Добро пожаловать'), texts('#channels .nm').join('|'));
 check('личные сообщения идут первыми в списке', !!$('#dmList'));
-check('клиент знает свою версию', doc.documentElement.innerHTML.includes("APP_VERSION = '1.5.0'"), '');
+check('клиент знает свою версию', doc.documentElement.innerHTML.includes("APP_VERSION = '1.6.0'"), '');
+
+// 2.1. Кнопка «Открыть демо-канал» показывает экскурсию и скрывает знакомство.
+$('#wcDemo').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await sleep(900);
+check('демо-канал открылся по кнопке', $('#welcome').classList.contains('hidden'), $('#welcome').className);
+check('в демо-канале есть сообщения', texts('#messages .msg .body').length >= 4, texts('#messages .msg .body').length + '');
 
 // 3. Анна создаёт канал через интерфейс. Название латиницей — тогда адрес
 // канала совпадает с названием и его видно в тесте.
