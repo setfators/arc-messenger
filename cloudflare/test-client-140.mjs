@@ -180,6 +180,25 @@ if (mediaImg) {
 const settingsBtn = $('#navSettings, [data-act="settings"]');
 if (settingsBtn) settingsBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 await sleep(50);
+// --- демонстрация экрана: 15/30/60 кадров -----------------------------------
+const voiceTabBtn = doc.querySelector('[data-tab="voice"]');
+check('вкладка «Голос и видео» есть', !!voiceTabBtn);
+if (voiceTabBtn) {
+  voiceTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(60);
+  const selects = [...doc.querySelectorAll('#settingsBody select')];
+  const fpsSel = selects.find((s) => [...s.options].some((o) => o.value === '60'));
+  check('настройка плавности экрана есть', !!fpsSel, 'selects=' + selects.length);
+  check('в настройке три режима кадров', !!fpsSel && [...fpsSel.options].map((o) => o.value).join(',') === '15,30,60',
+    fpsSel ? [...fpsSel.options].map((o) => o.value).join(',') : '');
+  if (fpsSel) {
+    fpsSel.value = '60';
+    fpsSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await sleep(450);
+    const sent = ws.sent.filter((m) => m.t === 'settings_update' && m.settings && m.settings.screenFps === 60).pop();
+    check('режим 60 кадров уходит на сервер', !!sent, JSON.stringify(ws.sent.filter((m) => m.t === 'settings_update').slice(-2)));
+  }
+}
 const accountTabBtn = doc.querySelector('[data-tab="account"]');
 check('вкладка «Аккаунт» есть', !!accountTabBtn);
 if (accountTabBtn) {

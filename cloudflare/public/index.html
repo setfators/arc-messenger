@@ -963,6 +963,7 @@ const store = {
   stickers: [],
   screenStream: null,
   screenOn: false,
+  screenFps: 30,
   screenSender: '',
   voiceLimit: 8,
   callHidden: false,
@@ -3138,7 +3139,10 @@ function createPeer(name) {
   }
   // Если уже показываю экран — новому участнику трек сразу в оффер.
   if (store.screenOn && store.screenStream) {
-    store.screenStream.getVideoTracks().forEach((track) => pc.addTrack(track, store.screenStream));
+    store.screenStream.getVideoTracks().forEach((track) => {
+      const sender = pc.addTrack(track, store.screenStream);
+      tuneScreenSender(sender, store.screenFps || 30);
+    });
   }
   pc.onicecandidate = (event) => {
     if (!event.candidate) return;
@@ -3289,6 +3293,7 @@ function settingsDefaults() {
     soundVolume: 60, notifyTone: 'chime', dnd: false,
     dmPrivacy: 'all', status: 'online',
     voiceInput: '', voiceOutput: '', voiceVolume: 100, micGain: 100,
+    screenFps: 30,
     noiseSuppress: true, echoCancel: true, autoGain: true,
     turnUrl: '', turnUser: '', turnPass: '',
   };
@@ -3878,6 +3883,21 @@ function tabVoice(body) {
   addRange(sect2, 'Громкость собеседников', 'Входящий звук', 0, 200, 5, s.voiceVolume, '%', (v) => saveSettings({ voiceVolume: v }));
   addRange(sect2, 'Усиление микрофона', 'Если вас плохо слышно', 0, 200, 5, s.micGain, '%', (v) => saveSettings({ micGain: v }));
   body.appendChild(sect2);
+
+  // Демонстрация экрана: плавность. 60 кадров — заметно живее для видео,
+  // но требует стабильного соединения; 15 — режим экономии трафика.
+  const sectDemo = el('div', 'sect');
+  sectDemo.appendChild(el('h4', '', 'Демонстрация экрана'));
+  addSelect(
+    sectDemo,
+    'Плавность',
+    '60 кадров — для видео и анимаций, 30 — обычный режим, 15 — экономит трафик',
+    [['15', '15 кадров · экономить'], ['30', '30 кадров · обычное'], ['60', '60 кадров · плавно']],
+    String(s.screenFps || 30),
+    (v) => saveSettings({ screenFps: Number(v) })
+  );
+  sectDemo.appendChild(el('p', 'install-note', 'Применится при следующем включении показа экрана. Для 60 кадров нужно стабильное соединение — около 4–6 Мбит/с на зрителя.'));
+  body.appendChild(sectDemo);
 
   const sect3 = el('div', 'sect');
   sect3.appendChild(el('h4', '', 'Обработка звука'));
@@ -5644,8 +5664,29 @@ function pickScreenSource() {
   }));
 }
 
-async function startScreen() {
-  if (!store.voiceRoom) {
+// Плавность показа экрана: настройка общая (лежит на сервере), но действует
+// при следующем включении — перезапускать показ на ходу не нужно.
+function screenFpsValue() {
+  const raw = Number(S().screenFps);
+  return raw >= 50 ? 60 : raw >= 25 ? 30 : 15;
+}
+
+// Битрейт под выбранные кадры: 60 кадров требуют заметно больше полосы, чем
+// статичный текст на экране. Если сеть не тянет, браузер сам снизит качество.
+function tuneScreenSender(sender, fps) {
+  try {
+    if (!sender || !sender.getParameters || !sender.setParameters) return;
+    const params = sender.getParameters();
+    if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+    params.encodings[0].maxBitrate = fps >= 50 ? 6000000 : fps >= 30 ? 2500000 : 1200000;
+    params.encodings[0].maxFramerate = fps;
+    params.degradationPreference = fps >= 50 ? 'maintain-framerate' : 'balanced';
+    const result = sender.setParameters(params);
+    if (result && typeof result.catch === 'function') result.catch(() => {});
+  } catch (_) { /* браузер не дал настроить — останутся его значения */ }
+}
+
+async function startScreen() {  if (!store.voiceRoom) {
     toast('Сначала войдите в голосовой канал');
     return;
   }
@@ -5667,10 +5708,11 @@ async function startScreen() {
     try { await bridge.pickScreenSource(sourceId); } catch (error) {}
   }
   let stream;
+  const fps = screenFpsValue();
   try {
     // В приложении со звуком: на Windows захватывается звук системы.
     stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: 15 },
+      video: { frameRate: { ideal: fps, max: fps } },
       audio: !!bridge,
     });
   } catch (error) {
@@ -5679,12 +5721,22 @@ async function startScreen() {
   }
   store.screenStream = stream;
   store.screenOn = true;
+  store.screenFps = fps;
   const track = stream.getVideoTracks()[0];
-  if (track) track.onended = () => stopScreen(true);
+  if (track) {
+    track.onended = () => stopScreen(true);
+    // Для плавного видео важнее движение, для текста — чёткость.
+    try {
+      if ('contentHint' in track) track.contentHint = fps >= 50 ? 'motion' : 'detail';
+    } catch (_) {}
+  }
   send({ t: 'voice_screen', sharing: true });
   for (const [name, peer] of store.peers) {
     try {
-      stream.getTracks().forEach((t) => peer.pc.addTrack(t, stream));
+      stream.getTracks().forEach((t) => {
+        const sender = peer.pc.addTrack(t, stream);
+        if (t.kind === 'video') tuneScreenSender(sender, fps);
+      });
       send({ t: 'rtc', to: name, kind: 'renego' });
     } catch (error) {}
   }

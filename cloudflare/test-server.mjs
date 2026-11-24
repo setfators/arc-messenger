@@ -241,6 +241,20 @@ A.send({ t: 'typing', room, stopped: true });
 const typedStop = await B.waitFresh((m) => m.t === 'typing' && m.stopped, 2500, 'typing stop');
 check('остановка typing доходит', !!typedStop);
 
+// --- демонстрация экрана: режимы кадров -------------------------------------
+C.send({ t: 'settings_update', settings: { screenFps: 60 } });
+const fps60 = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.screenFps === 60, 2000, 'screenFps 60');
+check('режим 60 кадров сохраняется', !!fps60, JSON.stringify(fps60 && fps60.settings && fps60.settings.screenFps));
+C.send({ t: 'settings_update', settings: { screenFps: 45 } });
+const fps45 = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.screenFps === 30, 2000, 'screenFps 30');
+check('промежуточное значение приводится к 30', !!fps45, JSON.stringify(fps45 && fps45.settings && fps45.settings.screenFps));
+C.send({ t: 'settings_update', settings: { screenFps: 999 } });
+const fps999 = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.screenFps === 60, 2000, 'screenFps clamp');
+check('слишком большое значение ограничено 60', !!fps999, JSON.stringify(fps999 && fps999.settings && fps999.settings.screenFps));
+C.send({ t: 'settings_update', settings: { screenFps: 1 } });
+const fps1 = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.screenFps === 15, 2000, 'screenFps min');
+check('слишком маленькое значение поднимается до 15', !!fps1, JSON.stringify(fps1 && fps1.settings && fps1.settings.screenFps));
+
 // --- приватность лички -------------------------------------------------------
 C.send({ t: 'settings_update', settings: { dmPrivacy: 'friends' } });
 await C.waitFresh((m) => m.t === 'settings', 2000, 'settings');

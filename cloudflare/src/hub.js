@@ -92,6 +92,7 @@ function defaultSettings() {
     status: 'online',     // online | idle | dnd | invisible
     notifyTone: 'chime',  // chime | pop | blip
     voiceMode: 'activity',// activity | ptt
+    screenFps: 30,        // 15 | 30 | 60 — плавность демонстрации экрана
     voiceInput: '',       // deviceId микрофона
     voiceOutput: '',      // deviceId наушников
     voiceVolume: 100,     // 0..200
@@ -119,6 +120,11 @@ function mergeSettings(base, patch) {
   if (patch.micGain !== undefined) out.micGain = num(patch.micGain, 0, 200, out.micGain);
   if (patch.soundVolume !== undefined) out.soundVolume = num(patch.soundVolume, 0, 100, out.soundVolume);
   if (patch.voiceMode === 'ptt' || patch.voiceMode === 'activity') out.voiceMode = patch.voiceMode;
+  if (patch.screenFps !== undefined) {
+    // Разрешаем только три режима: 15 (экономия), 30 (обычный) и 60 (плавно).
+    const fps = num(patch.screenFps, 10, 60, out.screenFps);
+    out.screenFps = fps >= 50 ? 60 : fps >= 25 ? 30 : 15;
+  }
   if (patch.searchPrivacy === 'all' || patch.searchPrivacy === 'friends') out.searchPrivacy = patch.searchPrivacy;
   for (const flag of ['compact', 'showTime', 'enterToSend', 'notifySound', 'notifyDesktop', 'notifyAll', 'dnd', 'showTyping', 'showAvatars', 'groupMessages', 'clock24', 'noiseSuppress', 'echoCancel', 'autoGain']) {
     if (typeof patch[flag] === 'boolean') out[flag] = patch[flag];
