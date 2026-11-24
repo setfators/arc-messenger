@@ -32,7 +32,22 @@ async function api(path, body) {
 const annaName = 'e2eanna' + stamp;
 const borisName = 'e2eboris' + stamp;
 const anna = await api('/api/register', { name: annaName, password: 'parol123' });
-const boris = await api('/api/register', { name: borisName, password: 'parol456' });
+if (!anna.data || !anna.data.token) {
+  console.log('\nБаза не пустая: для сквозного теста нужен свежий --persist-to.');
+  process.exit(2);
+}
+// Второй аккаунт регистрируется по коду приглашения от первого (владельца).
+const invWs = new WebSocket(WSURL + '/ws?token=' + encodeURIComponent(anna.data.token));
+const invGot = [];
+invWs.on('message', (raw) => invGot.push(JSON.parse(raw.toString())));
+await new Promise((res) => { invWs.on('open', res); invWs.on('error', res); setTimeout(res, 4000); });
+invWs.send(JSON.stringify({ t: 'invite_create', max: 5 }));
+await sleep(700);
+const invMsg = invGot.find((m) => m.t === 'invite_created');
+const inviteCode = invMsg && invMsg.invite ? invMsg.invite.code : '';
+try { invWs.close(); } catch (_) {}
+check('код для второго аккаунта получен', /^[A-Z0-9]{8}$/.test(inviteCode), String(inviteCode));
+const boris = await api('/api/register', { name: borisName, password: 'parol456', invite: inviteCode });
 check('два аккаунта зарегистрированы', anna.status === 200 && boris.status === 200, anna.status + '/' + boris.status);
 
 // 2. Настоящий клиент Анны: jsdom + ws вместо браузерного WebSocket.

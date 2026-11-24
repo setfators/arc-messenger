@@ -300,6 +300,8 @@ export class ChatHub {
         if (!this.store.push) this.store.push = {};
         // Сценарий «для своих»: владелец, коды-приглашения и режим закрытой регистрации.
         if (!Array.isArray(this.store.invites)) this.store.invites = [];
+        if (!Array.isArray(this.store.staff)) this.store.staff = [];
+        this.store.staff = this.store.staff.filter((k) => this.store.users[k] && k !== this.store.owner);
         if (this.store.inviteOnly === undefined) this.store.inviteOnly = true;
         // Владелец — самый первый аккаунт. Если он удалён, права переходят
         // к следующему по времени регистрации, иначе управлять будет некому.
@@ -431,6 +433,26 @@ export class ChatHub {
     return !!this.store.owner && this.store.owner === key;
   }
 
+  // Сотрудник — это модератор: может удалять любые сообщения и выдавать мьют.
+  isStaff(key) {
+    return Array.isArray(this.store.staff) && this.store.staff.includes(key);
+  }
+
+  // Право на модерацию есть у владельца и сотрудников.
+  canModerate(key) {
+    return this.isOwner(key) || this.isStaff(key);
+  }
+
+  roleOf(key) {
+    if (this.isOwner(key)) return 'owner';
+    if (this.isStaff(key)) return 'staff';
+    return 'member';
+  }
+
+  isMuted(user) {
+    return !!(user && user.mutedUntil && user.mutedUntil > now());
+  }
+
   rateAllow(key, bucket, limit, windowMs) {
     if (!this.store.rates) this.store.rates = {};
     const mine = this.store.rates[key] || (this.store.rates[key] = {});
@@ -472,6 +494,34 @@ export class ChatHub {
       created: item.created || 0,
       by: item.by || '',
       usedBy: Array.isArray(item.usedBy) ? item.usedBy : [],
+    };
+  }
+
+  // Экспорт базы для бэкапа: всё, кроме хэшей паролей и токенов.
+  // Состав команды: владелец, сотрудники и заблокированные — для вкладки модерации.
+  staffPayload() {
+    const online = this.onlineNames().map((n) => n.toLowerCase());
+    const view = (key) => {
+      const user = this.store.users[key];
+      if (!user) return null;
+      const profile = this.profileView(user);
+      return {
+        name: user.name,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
+        online: online.includes(user.name.toLowerCase()),
+        mutedUntil: user.mutedUntil || 0,
+      };
+    };
+    const owner = this.store.owner ? view(this.store.owner) : null;
+    const staff = (this.store.staff || []).map(view).filter(Boolean);
+    const banned = Object.keys(this.store.banned || {}).map(view).filter(Boolean);
+    return {
+      t: 'staff_list',
+      owner,
+      staff,
+      banned,
+      canBan: true,
     };
   }
 
@@ -1100,6 +1150,10 @@ export class ChatHub {
 
     if (action === 'register') {
       if (existing) return fail('Такое имя уже занято');
+      // Заблокированный аккаунт новый не заводит: сначала владелец снимет бан.
+      if (this.store.banned && this.store.banned[key]) {
+        return fail('Это имя заблокировано', 403);
+      }
 
       // Регистрация «для своих»: первый аккаунт становится владельцем и
       // заводится свободно, остальным нужен код-приглашение.
@@ -1160,6 +1214,12 @@ export class ChatHub {
       return fail('Неверное имя или пароль');
     }
     await this.clearAuthFail(addr);
+    // Заблокированный аккаунт не входит, даже с верным паролем.
+    if (existing.banned || (this.store.banned && this.store.banned[key])) {
+      existing.banned = true;
+      await this.save();
+      return fail('Аккаунт заблокирован модератором', 403);
+    }
     // Старый SHA-256-хэш заменяем на PBKDF2 прямо при успешном входе.
     if (existing.algo !== 'pbkdf2') {
       existing.pass = await hashPassword(password, existing.salt);
@@ -1167,7 +1227,14 @@ export class ChatHub {
     }
     const token = this.mintToken(key);
     await this.save();
-    return new Response(JSON.stringify({ token, name: existing.name, color: existing.color }), {
+    return new Response(JSON.stringify({
+      token,
+      name: existing.name,
+      color: existing.color,
+      role: this.roleOf(key),
+      isOwner: this.isOwner(key),
+      isStaff: this.isStaff(key),
+    }), {
       headers: { 'content-type': 'application/json; charset=utf-8' },
     });
   }
@@ -1177,6 +1244,10 @@ export class ChatHub {
     const owner = this.store.tokens[token];
     const user = owner ? this.store.users[owner] : null;
     if (!user) return new Response('unauthorized', { status: 401 });
+    // Заблокированный аккаунт не подключается даже со старым токеном.
+    if (user.banned || (this.store.banned && this.store.banned[owner])) {
+      return new Response('banned', { status: 403 });
+    }
     const key = owner;
 
     const pair = new WebSocketPair();
@@ -1191,6 +1262,9 @@ export class ChatHub {
       // Права этого аккаунта и режим регистрации — клиент показывает по ним
       // вкладку управления и подсказки на экране входа.
       isOwner: this.store.owner === key,
+      // Владелец тоже может модерировать, поэтому для него isStaff — true.
+      isStaff: this.canModerate(key),
+      role: this.roleOf(key),
       inviteOnly: !!this.store.inviteOnly,
       me: {
         name: user.name,
@@ -1299,6 +1373,16 @@ export class ChatHub {
       if (!isChannel && !isDm) return;
       // Антифлуд: иначе один человек за минуту забьёт всю историю канала.
       const rate = this.checkMessageRate(key);
+      // Заблокированный не пишет вовсе, замьюченный — до конца срока.
+      if (user.banned || (this.store.banned && this.store.banned[key])) {
+        this.sendTo(key, { t: 'error', text: 'Аккаунт заблокирован' });
+        return;
+      }
+      if (this.isMuted(user)) {
+        const left = Math.ceil((user.mutedUntil - now()) / 60000);
+        this.sendTo(key, { t: 'error', text: 'Вам запрещено писать ещё ' + left + ' мин.' });
+        return;
+      }
       if (!rate.ok) {
         this.sendTo(key, { t: 'error', text: 'Слишком часто. Подождите ' + rate.retry + ' с.' });
         return;
@@ -1538,7 +1622,7 @@ export class ChatHub {
       if (!list || !id) return;
       const idx = list.findIndex((m) => m.id === id);
       if (idx < 0) return;
-      if (String(list[idx].author).toLowerCase() !== name.toLowerCase() && !this.isOwner(key)) {
+      if (String(list[idx].author).toLowerCase() !== name.toLowerCase() && !this.canModerate(key)) {
         this.sendTo(key, { t: 'error', text: 'Удалять можно только свои сообщения' });
         return;
       }
@@ -1634,6 +1718,129 @@ export class ChatHub {
       this.sendTo(key, { t: 'export_ready', data });
       return;
     }
+
+    // ------------------------------------------------ сотрудники и модерация
+    if (kind === 'staff_list') {
+      if (!this.canModerate(key)) return;
+      this.sendTo(key, this.staffPayload());
+      return;
+    }
+
+    if (kind === 'staff_add' || kind === 'staff_remove') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Сотрудников назначает владелец' });
+        return;
+      }
+      const target = this.findUserKey(value.name);
+      if (!target || target === key) {
+        this.sendTo(key, { t: 'error', text: 'Некого назначать' });
+        return;
+      }
+      if (!Array.isArray(this.store.staff)) this.store.staff = [];
+      if (kind === 'staff_add') {
+        if (!this.store.staff.includes(target)) this.store.staff.push(target);
+      } else {
+        this.store.staff = this.store.staff.filter((k) => k !== target);
+      }
+      await this.save();
+      const other = this.store.users[target];
+      this.sendTo(target, {
+        t: 'role_changed',
+        role: this.roleOf(target),
+        isStaff: this.isStaff(target),
+        isOwner: this.isOwner(target),
+      });
+      this.sendTo(target, {
+        t: 'notice',
+        text: kind === 'staff_add' ? 'Вы назначены сотрудником: можно удалять любые сообщения и выдавать мьют' : 'Вы больше не сотрудник',
+      });
+      this.sendTo(key, this.staffPayload());
+      this.broadcast(this.presencePayload());
+      // Обновляем карточки у тех, кто смотрит список сотрудников.
+      for (const ws of this.allSockets()) {
+        const meta = ws.deserializeAttachment();
+        if (meta && this.canModerate(meta.key)) this.sendTo(meta.key, this.staffPayload());
+      }
+      return;
+    }
+
+    if (kind === 'user_mute' || kind === 'user_unmute') {
+      if (!this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Мьют выдаёт владелец или сотрудник' });
+        return;
+      }
+      const target = this.findUserKey(value.name);
+      if (!target) {
+        this.sendTo(key, { t: 'error', text: 'Такого пользователя нет' });
+        return;
+      }
+      if (this.isOwner(target)) {
+        this.sendTo(key, { t: 'error', text: 'Владельца замьютить нельзя' });
+        return;
+      }
+      if (this.isStaff(target) && !this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Сотрудника может замьютить только владелец' });
+        return;
+      }
+      const other = this.store.users[target];
+      if (!other) return;
+      if (kind === 'user_unmute') {
+        delete other.mutedUntil;
+        await this.save();
+        this.sendTo(target, { t: 'notice', text: 'Мьют снят' });
+        this.sendTo(key, { t: 'notice', text: other.name + ': мьют снят' });
+        return;
+      }
+      const minutes = Math.min(1440, Math.max(1, Number(value.minutes) || 10));
+      other.mutedUntil = now() + minutes * 60000;
+      await this.save();
+      this.sendTo(target, {
+        t: 'notice',
+        text: 'Вам запрещено писать ' + minutes + ' мин.: ' + (value.reason ? String(value.reason).slice(0, 120) : 'решение модератора'),
+      });
+      this.sendTo(key, { t: 'notice', text: other.name + ': мьют на ' + minutes + ' мин.' });
+      return;
+    }
+
+    if (kind === 'user_ban' || kind === 'user_unban') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Бан выдаёт только владелец' });
+        return;
+      }
+      const target = this.findUserKey(value.name);
+      if (!target || target === key) {
+        this.sendTo(key, { t: 'error', text: 'Некого блокировать' });
+        return;
+      }
+      if (!this.store.banned) this.store.banned = {};
+      const other = this.store.users[target];
+      if (!other) return;
+      if (kind === 'user_unban') {
+        delete this.store.banned[target];
+        delete other.banned;
+        await this.save();
+        this.sendTo(key, { t: 'notice', text: other.name + ' разблокирован' });
+        return;
+      }
+      this.store.banned[target] = now();
+      other.banned = true;
+      // Гасим все сессии забаненного и закрываем его сокеты.
+      for (const [tk, ownerKey] of Object.entries(this.store.tokens)) {
+        if (ownerKey === target) {
+          delete this.store.tokens[tk];
+          if (this.store.tokenAt) delete this.store.tokenAt[tk];
+        }
+      }
+      if (Array.isArray(this.store.staff)) this.store.staff = this.store.staff.filter((k) => k !== target);
+      await this.save();
+      for (const ws of this.sockets(target)) {
+        try { ws.close(1008, 'banned'); } catch (_) { /* уже закрыт */ }
+      }
+      this.sendTo(key, { t: 'notice', text: other.name + ' заблокирован' });
+      this.broadcast(this.presencePayload());
+      return;
+    }
+
 
     // Загрузка картинки-аватара (data URL в base64, не больше 512 КБ).
     if (kind === 'avatar_upload') {

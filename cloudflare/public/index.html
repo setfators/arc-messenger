@@ -637,6 +637,7 @@
       <button data-tab="bridges">Мосты и сервер</button>
       <button data-tab="account">Аккаунт</button>
   <button data-tab="manage" class="owner-only hidden">Управление</button>
+  <button data-tab="moderation" class="staff-only hidden">Модерация</button>
     </div>
     <div class="settings-body" id="settingsBody"></div>
   </div>
@@ -719,6 +720,9 @@ const store = {
   token: localStorage.getItem('token') || '',
   me: null,
   isOwner: false,
+  isStaff: false,
+  role: 'member',
+  staff: { owner: null, staff: [], banned: [] },
   inviteOnly: true,
   invites: [],
   channels: [],
@@ -1079,6 +1083,8 @@ function handle(data) {
     case 'hello': {
       store.me = data.me;
       store.isOwner = !!data.isOwner;
+      store.isStaff = !!data.isStaff || !!data.isOwner;
+      store.role = data.role || (store.isOwner ? 'owner' : 'member');
       store.inviteOnly = data.inviteOnly !== false;
       store.channels = data.channels || [];
       store.reconnectTries = 0;
@@ -1332,6 +1338,25 @@ function handle(data) {
       break;
     }
     case 'export_ready': {
+      break;
+    }
+    case 'staff_list': {
+      store.staff = {
+        owner: data.owner || null,
+        staff: Array.isArray(data.staff) ? data.staff : [],
+        banned: Array.isArray(data.banned) ? data.banned : [],
+      };
+      renderStaff();
+      break;
+    }
+    case 'role_changed': {
+      store.isOwner = !!data.isOwner;
+      store.isStaff = !!data.isStaff;
+      store.role = data.role || 'member';
+      // Права изменились — перерисовываем интерфейс под новую роль.
+      renderChannels();
+      renderMessages();
+      if (settingsOpen()) renderSettings(currentTab);
       break;
     }
   }
@@ -1607,8 +1632,8 @@ function messageToolsNode(m, row) {
   reply.textContent = 'Ответить';
   reply.onclick = (event) => { event.stopPropagation(); setReply(m); };
   tools.appendChild(reply);
-  // Своё сообщение может удалить автор, любое — владелец.
-  if (store.me && m.id && (m.author === store.me.name || store.isOwner)) {
+  // Своё сообщение удаляет автор, чужое — сотрудник или владелец.
+  if (store.me && m.id && (m.author === store.me.name || store.isStaff)) {
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'del-msg';
@@ -3531,6 +3556,140 @@ function tabManage(body) {
   send({ t: 'invite_list' });
 }
 
+/* --------------------------------------------------- модерация (сотрудники) */
+function tabModeration(body) {
+  body.appendChild(headBlock('Модерация', 'Сотрудники могут удалять любые сообщения и выдавать мьют. Бан и назначение сотрудников — только владелец.'));
+  if (!store.isStaff) {
+    body.appendChild(el('p', 'hint', 'Этот раздел доступен владельцу и сотрудникам.'));
+    return;
+  }
+
+  // 1. Состав команды.
+  const team = el('div', 'sect');
+  team.appendChild(el('h4', '', 'Команда'));
+  const owner = store.staff.owner;
+  if (owner) {
+    const row = el('div', 'invite-row');
+    row.appendChild(el('span', 'invite-code', '★'));
+    row.appendChild(el('span', 'invite-info', owner.displayName + ' — владелец'));
+    team.appendChild(row);
+  }
+  for (const person of store.staff.staff || []) {
+    const row = el('div', 'invite-row');
+    row.appendChild(el('span', 'invite-code', '◆'));
+    row.appendChild(el('span', 'invite-info', person.displayName + ' — сотрудник' + (person.mutedUntil > Date.now() ? ' (замьючен)' : '')));
+    if (store.isOwner) {
+      const off = el('button', 'danger', 'Снять');
+      off.type = 'button';
+      off.onclick = () => send({ t: 'staff_remove', name: person.name });
+      row.appendChild(off);
+    }
+    team.appendChild(row);
+  }
+  if (!(store.staff.staff || []).length) {
+    team.appendChild(el('p', 'hint', store.isOwner
+      ? 'Сотрудников пока нет. Назначьте человека по имени ниже.'
+      : 'Кроме владельца сотрудников нет.'));
+  }
+  body.appendChild(team);
+
+  // 2. Управление людьми.
+  const manage = el('div', 'sect');
+  manage.appendChild(el('h4', '', 'Пользователь'));
+
+  const nameInput = document.createElement('input');
+  nameInput.placeholder = 'Имя пользователя';
+  nameInput.autocomplete = 'off';
+  nameInput.style.marginBottom = '8px';
+  manage.appendChild(nameInput);
+
+  const muteRow = el('div', 'upd-row');
+  const muteSelect = document.createElement('select');
+  for (const [value, label] of [['10', '10 минут'], ['60', '1 час'], ['360', '6 часов'], ['1440', 'сутки']]) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    muteSelect.appendChild(opt);
+  }
+  muteSelect.style.marginRight = '8px';
+  const muteBtn = el('button', 'primary', 'Замьютить');
+  muteBtn.type = 'button';
+  muteBtn.onclick = () => {
+    const name = nameInput.value.trim();
+    if (!name) { toast('Введите имя'); return; }
+    send({ t: 'user_mute', name, minutes: Number(muteSelect.value) });
+  };
+  const unmuteBtn = el('button', '', 'Снять мьют');
+  unmuteBtn.type = 'button';
+  unmuteBtn.onclick = () => {
+    const name = nameInput.value.trim();
+    if (!name) { toast('Введите имя'); return; }
+    send({ t: 'user_unmute', name });
+  };
+  muteRow.append(muteSelect, muteBtn, unmuteBtn);
+  manage.appendChild(muteRow);
+
+  // Назначение сотрудника и бан — только владельцу.
+  if (store.isOwner) {
+    const staffRow = el('div', 'upd-row');
+    const addStaff = el('button', 'primary', 'Назначить сотрудником');
+    addStaff.type = 'button';
+    addStaff.onclick = () => {
+      const name = nameInput.value.trim();
+      if (!name) { toast('Введите имя'); return; }
+      send({ t: 'staff_add', name });
+    };
+    const banBtn = el('button', 'danger', 'Заблокировать');
+    banBtn.type = 'button';
+    banBtn.onclick = async () => {
+      const name = nameInput.value.trim();
+      if (!name) { toast('Введите имя'); return; }
+      const ok = await openDialog({
+        title: 'Заблокировать ' + name + '?',
+        text: 'Человек не сможет войти: все его сессии закроются, сообщения останутся. Разблокировать можно здесь же.',
+        ok: 'Заблокировать',
+        danger: true,
+      });
+      if (ok) send({ t: 'user_ban', name });
+    };
+    staffRow.append(addStaff, banBtn);
+    manage.appendChild(staffRow);
+  }
+  body.appendChild(manage);
+
+  // 3. Заблокированные.
+  const banned = store.staff.banned || [];
+  if (banned.length) {
+    const sect = el('div', 'sect');
+    sect.appendChild(el('h4', '', 'Заблокированные — ' + banned.length));
+    for (const person of banned) {
+      const row = el('div', 'invite-row');
+      row.appendChild(el('span', 'invite-code', '⛔'));
+      row.appendChild(el('span', 'invite-info', person.displayName));
+      if (store.isOwner) {
+        const off = el('button', '', 'Разблокировать');
+        off.type = 'button';
+        off.onclick = () => send({ t: 'user_unban', name: person.name });
+        row.appendChild(off);
+      }
+      sect.appendChild(row);
+    }
+    body.appendChild(sect);
+  }
+
+  // 4. Что можно.
+  const sectRules = el('div', 'sect');
+  sectRules.appendChild(el('h4', '', 'Права'));
+  sectRules.appendChild(el('p', 'hint', 'Сотрудник: удаляет любые сообщения, выдаёт и снимает мьют. Владелец: всё то же, плюс назначает сотрудников, банит, удаляет каналы и выдаёт коды приглашений.'));
+  body.appendChild(sectRules);
+
+  send({ t: 'staff_list' });
+}
+
+function renderStaff() {
+  if (settingsOpen() && currentTab === 'moderation') renderSettings('moderation');
+}
+
 function renderInvites(container) {
   const box = container || $('inviteList');
   if (!box) return;
@@ -3694,8 +3853,12 @@ function renderSettings(tab) {
   document.querySelectorAll('.owner-only').forEach((node) => {
     node.classList.toggle('hidden', !store.isOwner);
   });
-  const tabs = { profile: tabProfile, appearance: tabAppearance, notify: tabNotify, privacy: tabPrivacy, voice: tabVoice, stickers: tabStickers, bridges: tabBridges, account: tabAccount, manage: tabManage };
+  document.querySelectorAll('.staff-only').forEach((node) => {
+    node.classList.toggle('hidden', !store.isStaff);
+  });
+  const tabs = { profile: tabProfile, appearance: tabAppearance, notify: tabNotify, privacy: tabPrivacy, voice: tabVoice, stickers: tabStickers, bridges: tabBridges, account: tabAccount, manage: tabManage, moderation: tabModeration };
   if (currentTab === 'manage' && !store.isOwner) currentTab = 'profile';
+  if (currentTab === 'moderation' && !store.isStaff) currentTab = 'profile';
   (tabs[currentTab] || tabProfile)(body);
 }
 function openSettings(tab) {

@@ -58,3 +58,7 @@ console.log('проверка CORS завершена');
 
 console.log('\nпроблем: ' + problems.length);
 if (problems.length) process.exitCode = 1;
+
+// Открытые WebSocket-соединения держат event loop — завершаемся принудительно,
+// иначе тест «висит» после последней строки.
+setTimeout(() => process.exit(process.exitCode || 0), 300);

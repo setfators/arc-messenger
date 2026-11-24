@@ -42,6 +42,10 @@ async function waitFor(client, pred, ms = 3000) {
 const ownerName = 'own' + stamp;
 const owner = await api('/api/register', { name: ownerName, password: 'parol123' });
 check('первый аккаунт — владелец', owner.status === 200 && owner.data.isOwner === true, JSON.stringify(owner.data));
+if (!owner.data || !owner.data.token) {
+  console.log('\nБаза не пустая: набор проверяет первого владельца, нужен свежий --persist-to.');
+  process.exit(2);
+}
 
 const closed = await api('/api/register', { name: 'guest' + stamp, password: 'parol123' });
 check('закрытая регистрация не пускает без кода', closed.status === 403 && closed.data.inviteRequired === true, JSON.stringify(closed.data));
@@ -127,3 +131,6 @@ try { ows.ws.close(); gws.ws.close(); } catch (_) {}
 
 console.log('\nпроблем: ' + problems.length);
 if (problems.length) process.exitCode = 1;
+
+// Открытые WebSocket-соединения держат event loop — завершаемся принудительно.
+setTimeout(() => process.exit(process.exitCode || 0), 300);

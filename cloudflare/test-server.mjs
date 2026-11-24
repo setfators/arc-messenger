@@ -97,6 +97,13 @@ const userB = 'boris' + stamp;
 const userC = 'vera' + stamp;
 const regA = await api('/api/register', { name: userA, password: 'parolA1' });
 check('регистрация первого', regA.status === 200 && !!regA.data.token, JSON.stringify(regA.data));
+if (!regA.data || !regA.data.token) {
+  // Тест рассчитан на пустую базу: он проверяет, что первый аккаунт — владелец.
+  // На занятой базе регистрация требует код, и дальше проверять нечего.
+  console.log('\nБаза не пустая: этот набор нужно запускать на свежем хранилище.');
+  console.log('Останови сервер, удали каталог --persist-to и запусти снова.');
+  process.exit(2);
+}
 check('первый аккаунт становится владельцем', !!regA.data?.isOwner, JSON.stringify(regA.data));
 
 // Без кода приглашения дальше не пускают.
@@ -390,3 +397,6 @@ if (problems.length) {
   for (const p of problems) console.log(' - ' + p);
   process.exitCode = 1;
 }
+
+// Открытые WebSocket-соединения держат event loop — завершаемся принудительно.
+setTimeout(() => process.exit(process.exitCode || 0), 300);
