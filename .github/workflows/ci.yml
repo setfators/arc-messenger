@@ -40,6 +40,9 @@ jobs:
       - name: Мобильная сборка и её проверка
         run: npm run test:mobile
 
+      - name: Различия сайта и APK, адаптивность
+        run: node test-shell.mjs
+
       - name: Пробная сборка воркера
         run: npm run deploy:dry
 

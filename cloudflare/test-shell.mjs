@@ -25,6 +25,11 @@ for (const [name, html] of [['сайт', web], ['APK', mobile]]) {
   check(name + ': карточка файла', html.includes('file-card'), '');
   check(name + ': определение APK-оболочки', html.includes('function insideNativeShell'), '');
   check(name + ': кнопка установки приложения', html.includes('beforeinstallprompt'), '');
+  check(name + ': смена экрана на лету', html.includes('function switchScreen') && html.includes('replaceTrack'), '');
+  check(name + ': кнопки «Сменить экран»', html.includes("id=\"switchScreen\"") && html.includes("id=\"callSwitch\""), '');
+  check(name + ': адаптивная вёрстка', html.includes('100dvh') && html.includes('safe-area-inset') && html.includes('@media (max-width: 480px)'), '');
+  check(name + ': пересчёт размеров окна', html.includes('function syncViewport') && html.includes("addEventListener('orientationchange'"), '');
+  check(name + ': мета вьюпорта для клавиатуры', html.includes('interactive-widget=resizes-content'), '');
 }
 
 // Различия: в APK подсказка про уведомления, на сайте — про установку.

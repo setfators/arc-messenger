@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Arc</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#5865f2">
@@ -21,7 +21,7 @@
     --text: #e8eaed; --muted: #9aa0ab; --accent: #5865f2; --ok: #3ba55d; --danger: #ed4245;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
   body {
     background: var(--bg); color: var(--text); font: 15px/1.45 "Segoe UI", Roboto, Arial, sans-serif;
     overflow: hidden;
@@ -682,6 +682,78 @@
     .search-head { padding: 10px 12px; }
     .reply-bar { padding: 6px 12px; }
   }
+
+  /* ---------- адаптивность 1.8.1 ---------- */
+  /* Высота приложения = видимая область: в мобильном браузере панель
+     с адресом меняет высоту, а --vh обновляется из JS. */
+  .app {
+    height: calc(var(--vh, 1vh) * 100);
+    height: 100dvh;
+    min-height: 0;
+  }
+  .side, .main, .messages, .side-scroll { min-height: 0; }
+  .main { overflow: hidden; }
+  .messages { overscroll-behavior: contain; }
+  /* Безопасные зоны (вырез, скругления, домашняя полоса снизу). */
+  .rail { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .side { padding-left: env(safe-area-inset-left, 0px); }
+  .topbar { padding-left: calc(18px + env(safe-area-inset-left, 0px)); padding-right: calc(18px + env(safe-area-inset-right, 0px)); }
+  .composer { padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding-left: calc(18px + env(safe-area-inset-left, 0px)); padding-right: calc(18px + env(safe-area-inset-right, 0px)); }
+  /* Широкий монитор: не растягиваем ленту на весь экран. */
+  @media (min-width: 1500px) {
+    .messages { padding-left: max(18px, calc((100% - 1080px) / 2)); padding-right: max(18px, calc((100% - 1080px) / 2)); }
+    .app { grid-template-columns: 80px 280px minmax(0, 1fr); }
+  }
+  /* Узкий десктоп: боковая панель чуть уже. */
+  @media (min-width: 761px) and (max-width: 1100px) {
+    .app { grid-template-columns: 64px 208px minmax(0, 1fr); }
+    .side-head { padding: 14px 14px 8px; }
+  }
+  /* Планшет и телефон: колонка каналов — выезжающая панель. */
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 56px minmax(0, 1fr); }
+    .rail { gap: 8px; }
+    .rail-btn { width: 42px; height: 42px; border-radius: 12px; }
+    .me { width: 42px; height: 42px; }
+    .side { left: 56px; width: min(84vw, 300px); }
+    .topbar { height: 52px; }
+    .msg .ava { width: 32px; height: 32px; flex-basis: 32px; font-size: 13px; }
+    .call-stage, .call { max-height: calc(var(--vh, 1vh) * 100); overflow-y: auto; }
+    .settings { height: calc(var(--vh, 1vh) * 100 - 16px); height: calc(100dvh - 16px); }
+    .voice-actions { flex-wrap: wrap; }
+  }
+  @media (max-width: 480px) {
+    .app { grid-template-columns: 50px minmax(0, 1fr); }
+    .side { left: 50px; width: min(90vw, 320px); }
+    .topbar { padding: 0 10px; gap: 8px; }
+    .topbar .tt { font-size: 15px; }
+    .messages { padding: 10px 8px 4px; }
+    .msg { gap: 7px; }
+    .msg .body { font-size: 14px; }
+    .composer { padding: 8px; gap: 6px; }
+    .composer input { min-width: 0; }
+    .wc-card { padding: 16px 12px; }
+    .wc-actions .primary, .wc-actions .pill { width: 100%; }
+    .dlg { padding: 16px; }
+    .dlg-row { flex-wrap: wrap; }
+    .settings-body { padding: 14px 12px 18px; }
+    .field { gap: 8px; }
+    .field .lbl { flex-basis: 100%; }
+    .field input[type=text], .field input[type=password], .field select { min-width: 0; width: 100%; }
+  }
+  /* Низкое окно (телефон в горизонтали, маленькое окно на ПК). */
+  @media (max-height: 560px) {
+    .topbar { height: 46px; }
+    .messages { padding-top: 10px; }
+    .voice-box { padding: 6px 10px 8px; }
+    .welcome { align-items: flex-start; padding: 10px 14px 16px; }
+    .wc-preview { display: none; }
+    .call-head { padding: 8px 12px; }
+    .settings { height: calc(var(--vh, 1vh) * 100 - 10px); height: calc(100dvh - 10px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  }
 </style>
 </head>
 <body>
@@ -727,6 +799,7 @@
       <div id="voiceUsers"></div>
       <div class="ptt-hint hidden" id="pttHint"></div>
       <div class="voice-actions">
+        <button class="pill hidden" id="switchScreen" title="Показать другой экран, не прекращая демонстрацию">Сменить экран</button>
         <button class="pill" id="screenBtn" title="Показать свой экран всем в канале">Экран</button>
         <button class="pill" id="callOpen" title="Развернуть звонок">Звонок</button>
         <button class="pill on" id="micBtn">🎤 Микрофон</button>
@@ -847,6 +920,7 @@
   <div class="call-head">
     <div class="call-title" id="callTitle">Звонок</div>
     <div class="call-people" id="callCount"></div>
+    <button class="pill hidden" id="callSwitch" type="button" title="Показать другой экран">Сменить экран</button>
     <button class="pill danger call-hang" id="callHangup" type="button">Завершить</button>
     <button class="cbtn" id="callClose" title="Свернуть">✕</button>
   </div>
@@ -976,7 +1050,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -4392,7 +4466,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.8.0.apk');
+  apkLink.setAttribute('download', 'Arc-1.8.1.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';
@@ -5802,9 +5876,14 @@ function hideCall() {
 
 function updateScreenBtn() {
   const btn = $('screenBtn');
-  if (!btn) return;
-  btn.classList.toggle('on', !!store.screenOn);
-  btn.textContent = store.screenOn ? 'Стоп экран' : 'Экран';
+  if (btn) {
+    btn.classList.toggle('on', !!store.screenOn);
+    btn.textContent = store.screenOn ? 'Стоп экран' : 'Экран';
+  }
+  for (const id of ['switchScreen', 'callSwitch']) {
+    const extra = $(id);
+    if (extra) extra.classList.toggle('hidden', !store.screenOn);
+  }
 }
 
 // В приложении Electron системного диалога выбора источника нет:
@@ -6062,6 +6141,88 @@ window.addEventListener('blur', () => {
   renderVoiceBox();
 });
 
+/* ------------------------------------- смена экрана на лету 1.8.1 */
+// Настройки захвата одинаковые и для старта, и для смены источника.
+function screenCaptureSettings() {
+  const fps = screenFpsValue();
+  const quality = screenQualityValue();
+  const size = screenQualitySize(quality);
+  const video = { frameRate: { ideal: fps, max: fps } };
+  if (size) {
+    video.width = { ideal: size[0] };
+    video.height = { ideal: size[1] };
+  }
+  return { fps, quality, video };
+}
+function markScreenTrack(track, fps) {
+  if (!track) return;
+  track.onended = () => stopScreen(true);
+  // Для плавного видео важнее движение, для текста — чёткость.
+  try {
+    if ('contentHint' in track) track.contentHint = fps >= 50 ? 'motion' : 'detail';
+  } catch (error) {}
+}
+// В Electron источник выбирается своим списком, в браузере — системным окном.
+async function pickDesktopScreenSource() {
+  const bridge = desktopBridge();
+  if (!bridge || !bridge.screenSources) return { bridge: null, cancelled: false };
+  const sourceId = await pickScreenSource();
+  if (!sourceId) return { bridge, cancelled: true };
+  try { await bridge.pickScreenSource(sourceId); } catch (error) {}
+  return { bridge, cancelled: false };
+}
+
+// Сменить показываемый экран, не прекращая демонстрацию: новый трек
+// подставляется в уже открытые соединения через replaceTrack, так что
+// зрители не теряют картинку и не ждут пересогласования.
+async function switchScreen() {
+  if (!store.voiceRoom) { toast('Сначала войдите в голосовой канал'); return; }
+  if (!store.screenOn || !store.screenStream) { startScreen(); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    toast('Этот браузер не умеет показывать экран');
+    return;
+  }
+  const choice = await pickDesktopScreenSource();
+  if (choice.cancelled) return;
+  const { fps, quality, video } = screenCaptureSettings();
+  let fresh;
+  try {
+    fresh = await navigator.mediaDevices.getDisplayMedia({ video, audio: !!choice.bridge });
+  } catch (error) {
+    return; // передумали — остаёмся на старом экране
+  }
+  const old = store.screenStream;
+  const oldVideo = old ? old.getVideoTracks()[0] : null;
+  const audioTracks = old ? old.getAudioTracks() : [];
+  const newVideo = fresh.getVideoTracks()[0];
+  if (!newVideo) {
+    fresh.getTracks().forEach((track) => track.stop());
+    return;
+  }
+  // Звук системы не дублируем: старый аудиотрек продолжает идти.
+  fresh.getAudioTracks().forEach((track) => track.stop());
+  const next = new MediaStream([newVideo, ...audioTracks]);
+  try { oldVideo.onended = null; } catch (error) {}
+  if (oldVideo) { try { oldVideo.stop(); } catch (error) {} }
+  store.screenStream = next;
+  store.screenFps = fps;
+  store.screenQuality = quality;
+  markScreenTrack(newVideo, fps);
+  for (const peer of store.peers.values()) {
+    for (const sender of peer.pc.getSenders()) {
+      if (!sender.track || sender.track.kind !== 'video') continue;
+      try {
+        await sender.replaceTrack(newVideo);
+        tuneScreenSender(sender, fps, quality);
+      } catch (error) {}
+    }
+  }
+  const videoEl = $('screenVideo');
+  if (videoEl) videoEl.srcObject = next;
+  renderCall();
+  toast('Экран сменён');
+}
+
 async function startScreen() {
   if (!store.voiceRoom) {
     toast('Сначала войдите в голосовой канал');
@@ -6075,30 +6236,17 @@ async function startScreen() {
     toast('Этот браузер не умеет показывать экран');
     return;
   }
-  const bridge = desktopBridge();
-  if (bridge && bridge.screenSources) {
-    const sourceId = await pickScreenSource();
-    if (!sourceId) {
-      toast('Показ экрана отменён');
-      return;
-    }
-    try { await bridge.pickScreenSource(sourceId); } catch (error) {}
+  const bridgePick = await pickDesktopScreenSource();
+  if (bridgePick.cancelled) {
+    toast('Показ экрана отменён');
+    return;
   }
+  const bridge = bridgePick.bridge;
+  const { fps, quality, video } = screenCaptureSettings();
   let stream;
-  const fps = screenFpsValue();
-  const quality = screenQualityValue();
-  const size = screenQualitySize(quality);
-  const videoConstraints = { frameRate: { ideal: fps, max: fps } };
-  if (size) {
-    videoConstraints.width = { ideal: size[0] };
-    videoConstraints.height = { ideal: size[1] };
-  }
   try {
     // В приложении со звуком: на Windows захватывается звук системы.
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: videoConstraints,
-      audio: !!bridge,
-    });
+    stream = await navigator.mediaDevices.getDisplayMedia({ video, audio: !!bridge });
   } catch (error) {
     toast('Показ экрана отменён');
     return;
@@ -6107,14 +6255,7 @@ async function startScreen() {
   store.screenOn = true;
   store.screenFps = fps;
   store.screenQuality = quality;
-  const track = stream.getVideoTracks()[0];
-  if (track) {
-    track.onended = () => stopScreen(true);
-    // Для плавного видео важнее движение, для текста — чёткость.
-    try {
-      if ('contentHint' in track) track.contentHint = fps >= 50 ? 'motion' : 'detail';
-    } catch (_) {}
-  }
+  markScreenTrack(stream.getVideoTracks()[0], fps);
   send({ t: 'voice_screen', sharing: true });
   for (const [name, peer] of store.peers) {
     try {
@@ -6156,10 +6297,18 @@ function stopScreen(fromTrack) {
 function renderCall() {
   const stage = $('callStage');
   if (!stage || stage.classList.contains('hidden')) return;
+  updateScreenBtn();
   const users = store.voiceUsers || [];
   const limit = store.voiceLimit || 8;
   const title = $('callTitle');
-  if (title) title.textContent = store.voiceRoom ? 'Голосовой канал # ' + store.voiceRoom : 'Звонок';
+  if (title) {
+    const dm = store.voiceRoom && dmPartnersOf(store.voiceRoom);
+    title.textContent = !store.voiceRoom
+      ? 'Звонок'
+      : dm
+        ? 'Звонок · ' + displayNameOf(callPeerName(store.voiceRoom))
+        : 'Голос · ' + channelTitleOf(store.voiceRoom);
+  }
   const count = $('callCount');
   if (count) count.textContent = users.length + ' из ' + limit;
 
@@ -6206,6 +6355,8 @@ function renderCall() {
 }
 
 if ($('screenBtn')) $('screenBtn').onclick = () => openScreenDialog();
+if ($('switchScreen')) $('switchScreen').onclick = () => switchScreen();
+if ($('callSwitch')) $('callSwitch').onclick = () => switchScreen();
 if ($('callOpen')) $('callOpen').onclick = () => showCall();
 if ($('callClose')) $('callClose').onclick = () => hideCall();
 if ($('callHangup')) $('callHangup').onclick = () => leaveVoice();
@@ -6230,6 +6381,23 @@ document.addEventListener('wheel', (event) => {
   box.scrollTop += event.deltaY;
   event.preventDefault();
 }, { passive: false });
+
+/* ------------------------------------------------ адаптивность 1.8.1 */
+// После поворота телефона или изменения размера окна пересчитываем видимую
+// высоту, закрываем выехавшую колонку каналов и заново применяем масштаб.
+function syncViewport() {
+  const side = $('side');
+  if (side && window.innerWidth > 760) side.classList.remove('open');
+  const viewport = window.visualViewport;
+  const height = Math.round((viewport && viewport.height) || window.innerHeight || 0);
+  if (height > 0) document.documentElement.style.setProperty('--vh', height / 100 + 'px');
+  const scale = Math.max(85, Math.min(130, Number(S().fontScale) || 100));
+  document.body.style.zoom = String(scale / 100);
+}
+window.addEventListener('resize', syncViewport);
+window.addEventListener('orientationchange', () => setTimeout(syncViewport, 150));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', syncViewport);
+syncViewport();
 
 /* ------------------------------------------------------------------ старт */
 // Ссылка с приглашением: /?invite=CODE — сразу открываем регистрацию с кодом.

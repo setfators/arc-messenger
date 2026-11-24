@@ -1,7 +1,7 @@
 {
   "name": "messenger-desktop",
   "productName": "Arc",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Arc — десктопное приложение",
   "main": "main.js",
   "author": "setfators",
