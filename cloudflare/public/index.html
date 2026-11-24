@@ -723,6 +723,7 @@ const store = {
   isStaff: false,
   role: 'member',
   staff: { owner: null, staff: [], banned: [] },
+  backups: { items: [], lastBackup: '', keep: 7 },
   inviteOnly: true,
   invites: [],
   channels: [],
@@ -1357,6 +1358,24 @@ function handle(data) {
       renderChannels();
       renderMessages();
       if (settingsOpen()) renderSettings(currentTab);
+      break;
+    }
+    case 'backup_state': {
+      store.backups = {
+        items: Array.isArray(data.items) ? data.items : [],
+        lastBackup: data.lastBackup || '',
+        keep: Number(data.keep) || 7,
+      };
+      if (settingsOpen() && currentTab === 'manage') renderBackups();
+      break;
+    }
+    case 'password_reset_done': {
+      // Показываем пароль один раз: сохранять его на сервере нельзя.
+      openDialog({
+        title: 'Новый пароль для ' + (data.name || ''),
+        text: data.text || ('Пароль: ' + (data.password || '')),
+        ok: 'Понятно',
+      });
       break;
     }
   }
@@ -3689,6 +3708,40 @@ function tabModeration(body) {
     body.appendChild(sect);
   }
 
+  // 5. Резервные копии: ежедневный снимок базы.
+  const sectBkp = el('div', 'sect');
+  sectBkp.appendChild(el('h4', '', 'Резервные копии'));
+  const bkpRow = mkRow('Снимок базы', 'Сервер делает копию раз в сутки и хранит последние ' + (store.backups.keep || 7) + '. Здесь можно сделать копию вручную или откатиться.');
+  const bkpNow = el('button', 'primary', 'Сделать копию');
+  bkpNow.type = 'button';
+  bkpNow.onclick = () => send({ t: 'backup_now' });
+  bkpRow.appendChild(bkpNow);
+  sectBkp.appendChild(bkpRow);
+  const bkpList = el('div', 'invite-list');
+  bkpList.id = 'backupList';
+  sectBkp.appendChild(bkpList);
+  body.appendChild(sectBkp);
+  renderBackups(bkpList);
+
+  // 6. Сброс пароля участнику.
+  const sectPass = el('div', 'sect');
+  sectPass.appendChild(el('h4', '', 'Сброс пароля'));
+  const passRow = mkRow('Забыл пароль', 'Сервер выдаст временный пароль и закроет все сессии этого человека');
+  const resetName = document.createElement('input');
+  resetName.placeholder = 'Имя пользователя';
+  resetName.autocomplete = 'off';
+  resetName.style.marginRight = '8px';
+  const resetBtn = el('button', 'primary', 'Сбросить пароль');
+  resetBtn.type = 'button';
+  resetBtn.onclick = () => {
+    const name = resetName.value.trim();
+    if (!name) { toast('Введите имя'); return; }
+    send({ t: 'password_reset', name });
+  };
+  passRow.append(resetName, resetBtn);
+  sectPass.appendChild(passRow);
+  body.appendChild(sectPass);
+
   // 4. Что можно.
   const sectRules = el('div', 'sect');
   sectRules.appendChild(el('h4', '', 'Права'));
@@ -3696,6 +3749,51 @@ function tabModeration(body) {
   body.appendChild(sectRules);
 
   send({ t: 'staff_list' });
+  send({ t: 'backup_list' });
+}
+
+function renderBackups(container) {
+  const box = container || $('backupList');
+  if (!box) return;
+  box.innerHTML = '';
+  const items = store.backups.items || [];
+  if (!items.length) {
+    box.appendChild(el('p', 'hint', 'Снимков пока нет. Первый сервер сделает сам в течение суток, либо нажмите «Сделать копию».'));
+    return;
+  }
+  for (const item of items) {
+    const row = el('div', 'invite-row');
+    row.appendChild(el('span', 'invite-code', item.date));
+    const size = item.bytes ? (item.bytes > 1048576 ? (item.bytes / 1048576).toFixed(1) + ' МБ' : Math.max(1, Math.round(item.bytes / 1024)) + ' КБ') : '—';
+    row.appendChild(el('span', 'invite-info', (item.users || 0) + ' чел. · ' + (item.messages || 0) + ' сообщ. · ' + size));
+    const dl = el('button', '', 'Скачать');
+    dl.type = 'button';
+    dl.onclick = async () => {
+      try {
+        const res = await fetch(netUrl('/api/backup?date=' + encodeURIComponent(item.date)), { headers: { 'x-token': store.token } });
+        if (!res.ok) { toast('Не удалось скачать снимок'); return; }
+        const blob = await res.blob();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'arc-backup-' + item.date + '.json';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 4000);
+      } catch (error) { toast('Не удалось скачать снимок'); }
+    };
+    const restore = el('button', 'danger', 'Восстановить');
+    restore.type = 'button';
+    restore.onclick = async () => {
+      const ok = await openDialog({
+        title: 'Восстановить базу за ' + item.date + '?',
+        text: 'Текущее состояние сохранится как отдельный снимок, так что откатиться обратно будет можно. Сообщения после этой даты пропадут.',
+        ok: 'Восстановить',
+        danger: true,
+      });
+      if (ok) send({ t: 'backup_restore', date: item.date });
+    };
+    row.append(dl, restore);
+    box.appendChild(row);
+  }
 }
 
 function renderStaff() {

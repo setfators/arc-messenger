@@ -3,10 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "dev": "node node_modules/wrangler/bin/wrangler.js dev",
+    "deploy": "node node_modules/wrangler/bin/wrangler.js deploy",
+    "deploy:dry": "node node_modules/wrangler/bin/wrangler.js deploy --dry-run --outdir dist-check",
+    "check": "node --check src/hub.js && node --check src/index.js && node --check src/matrix.js",
+    "mobile:www": "node scripts/build-mobile-www.mjs",
+    "test": "node test-client.mjs && node test-client-140.mjs",
+    "test:mobile": "node scripts/build-mobile-www.mjs && node test-mobile.mjs"
   },
   "devDependencies": {
-    "wrangler": "^4.164.0"
+    "wrangler": "^4.164.0",
+    "ws": "^8.21.0",
+    "jsdom": "^25.0.1"
   }
 }

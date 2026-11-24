@@ -1,12 +1,11 @@
 // Проверяем мобильную сборку без телефона: интерфейс лежит локально,
 // а все сетевые обращения должны идти на абсолютный адрес сервера.
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { MOBILE_HTML, loadJsdom } from './test-helpers.mjs';
 
-const require = createRequire('C:/Users/setfators/Desktop/rust-messenger/cloudflare/test-mobile.mjs');
-const { JSDOM, VirtualConsole } = require('C:/Users/setfators/AppData/Local/Temp/jsdomtest/node_modules/jsdom');
+const { JSDOM, VirtualConsole } = loadJsdom();
 
-const html = readFileSync('C:/Users/setfators/Desktop/rust-messenger/cloudflare/mobile/www/index.html', 'utf8');
+const html = readFileSync(MOBILE_HTML, 'utf8');
 const problems = [];
 const check = (name, cond, extra) => {
   if (cond) { console.log('ok   ' + name); return; }

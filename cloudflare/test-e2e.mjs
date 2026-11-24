@@ -1,15 +1,14 @@
 // Сквозной тест: настоящий клиент (jsdom) + настоящий сервер (wrangler dev).
 // Регистрируемся через HTTP, подключаем клиент, проверяем шапку чата.
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { CLIENT_HTML, loadJsdom, loadWs } from './test-helpers.mjs';
 
-const require = createRequire('C:/Users/setfators/Desktop/rust-messenger/cloudflare/test-e2e.mjs');
-const { JSDOM, VirtualConsole } = require('C:/Users/setfators/AppData/Local/Temp/jsdomtest/node_modules/jsdom');
-const WebSocket = require('C:/Users/setfators/Desktop/rust-messenger/cloudflare/node_modules/ws');
+const { JSDOM, VirtualConsole } = loadJsdom();
+const WebSocket = loadWs();
 
 const BASE = process.env.BASE || 'http://127.0.0.1:8791';
 const WSURL = BASE.replace('http', 'ws');
-const html = readFileSync('C:/Users/setfators/Desktop/rust-messenger/cloudflare/public/index.html', 'utf8');
+const html = readFileSync(CLIENT_HTML, 'utf8');
 const stamp = Date.now().toString(36);
 const problems = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

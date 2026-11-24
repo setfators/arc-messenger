@@ -199,6 +199,28 @@ export default {
       return new Response(res.body, { status: res.status, headers: out });
     }
 
+    // Скачивание снимка базы (владелец): токен проверяет Durable Object.
+    if (url.pathname === '/api/backup') {
+      if (request.method !== 'GET') {
+        return new Response(JSON.stringify({ error: 'Нужен GET' }), {
+          status: 405,
+          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', allow: 'GET' },
+        });
+      }
+      const res = await stub.fetch('https://hub.internal/backup' + url.search, {
+        method: 'GET',
+        headers: { 'x-token': request.headers.get('x-token') || '' },
+      });
+      const out = new Headers(corsHeaders(request));
+      out.set('content-type', 'application/json; charset=utf-8');
+      out.set('cache-control', 'no-store');
+      for (const key of ['content-disposition']) {
+        const v = res.headers.get(key);
+        if (v) out.set(key, v);
+      }
+      return new Response(res.body, { status: res.status, headers: out });
+    }
+
     if (url.pathname === '/ws') return stub.fetch(request);
     // Разовая уборка «осиротевших» сообщений (удалённые аккаунты).
     // Экспорт базы для бэкапа: только владелец, токен в заголовке x-token.

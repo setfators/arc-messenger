@@ -1,0 +1,98 @@
+# Проверки на каждый push: синтаксис, клиентские тесты, протокол на живом
+# Durable Object (локальный wrangler) и пробная сборка воркера.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Синтаксис, клиент, сборка
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: Синтаксис сервера
+        run: npm run check
+
+      - name: Клиентские тесты (jsdom)
+        run: npm test
+
+      - name: Мобильная сборка и её проверка
+        run: npm run test:mobile
+
+      - name: Пробная сборка воркера
+        run: npm run deploy:dry
+
+  protocol:
+    name: Протокол на локальном Durable Object
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      # Каждый набор требует пустую базу — поднимаем свой сервер на каждый.
+      - name: Протокол, приглашения, модерация, бэкапы
+        run: |
+          set -e
+          PORT=8787
+          run_suite() {
+            local name="$1"; local file="$2"; local persist
+            persist="$(mktemp -d)"
+            echo "=== $name ==="
+            node node_modules/wrangler/bin/wrangler.js dev --port $PORT --persist-to "$persist" --local > "wrangler-$name.log" 2>&1 &
+            local pid=$!
+            for _ in $(seq 1 60); do
+              if curl -sf "http://127.0.0.1:$PORT/health" > /dev/null; then break; fi
+              sleep 2
+            done
+            BASE="http://127.0.0.1:$PORT" node "$file"
+            local code=$?
+            kill $pid 2>/dev/null || true
+            wait $pid 2>/dev/null || true
+            rm -rf "$persist"
+            if [ $code -ne 0 ]; then
+              echo "--- лог wrangler ($name) ---"
+              tail -50 "wrangler-$name.log" || true
+              exit $code
+            fi
+          }
+          run_suite protocol test-server.mjs
+          run_suite invites test-scenario-a.mjs
+          run_suite moderation test-moderation.mjs
+          run_suite backups test-backup.mjs
+          run_suite e2e test-e2e.mjs
+
+      - name: Логи wrangler при падении
+        if: failure()
+        run: tail -80 wrangler-*.log 2>/dev/null || true

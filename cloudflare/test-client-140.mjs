@@ -1,12 +1,10 @@
 // Смоук-тест клиента 1.4.0: ответы, реакции, поиск, профиль, картинки, аккаунт, push.
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { CLIENT_HTML, loadJsdom } from './test-helpers.mjs';
 
-const require = createRequire('C:/Users/setfators/Desktop/rust-messenger/cloudflare/test-client-140.mjs');
-const jsdomPath = process.env.JSDOM_DIR || 'C:/Users/setfators/AppData/Local/Temp/jsdomtest/node_modules/jsdom';
-const { JSDOM, VirtualConsole } = require(jsdomPath);
+const { JSDOM, VirtualConsole } = loadJsdom();
 
-const html = readFileSync('C:/Users/setfators/Desktop/rust-messenger/cloudflare/public/index.html', 'utf8');
+const html = readFileSync(CLIENT_HTML, 'utf8');
 const problems = [];
 const vc = new VirtualConsole();
 vc.on('jsdomError', (e) => problems.push('jsdomError: ' + (e && e.message)));

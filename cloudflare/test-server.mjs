@@ -1,10 +1,8 @@
 // Протокольный тест Cloudflare-версии: поднимаем два-три «браузера» и
 // прогоняем регистрацию, друзей, личку, приватность, typing, ping/pong,
 // удаление сообщений и выход.
-import { createRequire } from 'node:module';
 
-const require = createRequire('C:/Users/setfators/Desktop/rust-messenger/cloudflare/test-server.mjs');
-const WebSocket = require('C:/Users/setfators/Desktop/rust-messenger/cloudflare/node_modules/ws');
+import WebSocket from 'ws';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:8787';
 const problems = [];

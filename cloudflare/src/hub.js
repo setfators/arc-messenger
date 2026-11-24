@@ -49,6 +49,9 @@ const MSG_BURST = 15;         // не больше 15 сообщений…
 const MSG_BURST_WINDOW = 10 * 1000;   // …за 10 секунд
 const MSG_HOURLY = 300;       // и не больше 300 в час
 const CREATE_HOURLY = 10;     // каналов в час на человека
+// Сколько дневных снимков базы храним в самом Durable Object.
+const BACKUP_KEEP = 7;
+const TEMP_PASSWORD_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
 
 const COLORS = [
   '#5865f2', '#3ba55d', '#faa61a', '#ed4245', '#eb459e',
@@ -334,6 +337,12 @@ export class ChatHub {
             // Без WebCrypto push просто выключен — чат продолжает работать.
           }
         }
+        // Таймер объекта обслуживает и Matrix, и ежедневный бэкап. Если он не
+        // взведён (новый объект, старый деплой) — ставим на ближайшую минуту.
+        try {
+          const armed = await this.state.storage.getAlarm();
+          if (!armed) await this.state.storage.setAlarm(Date.now() + 60000);
+        } catch (_) { /* storage без alarm */ }
         return this.store;
       })();
     }
@@ -1120,6 +1129,54 @@ export class ChatHub {
       });
     }
 
+    // Скачивание конкретного снимка базы: только владелец, токен в x-token.
+    if (url.pathname === '/backup' && request.method === 'GET') {
+      const token = String(request.headers.get('x-token') || '').trim();
+      const owner = token ? this.store.tokens[token] : '';
+      if (!owner || !this.store.users[owner]) {
+        return new Response(JSON.stringify({ error: 'Нужен вход' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+      if (!this.isOwner(owner)) {
+        return new Response(JSON.stringify({ error: 'Снимки доступны только владельцу' }), {
+          status: 403,
+          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+      const date = String(url.searchParams.get('date') || '').trim();
+      const text = date ? await this.state.storage.get('bkp:' + date) : null;
+      if (!text) {
+        return new Response(JSON.stringify({ error: 'Снимка за ' + (date || '—') + ' нет' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+      // По умолчанию отдаём без хэшей паролей: файл могут переслать или
+      // положить в облако, и утечка хэшей там ни к чему. Для полного
+      // восстановления на другом сервере есть ?full=1.
+      let payload = text;
+      if (url.searchParams.get('full') !== '1') {
+        try {
+          const clean = JSON.parse(text);
+          for (const user of Object.values(clean.users || {})) {
+            delete user.pass;
+            delete user.salt;
+            delete user.algo;
+          }
+          payload = JSON.stringify(clean, null, 2);
+        } catch (_) { payload = text; }
+      }
+      return new Response(payload, {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+          'content-disposition': 'attachment; filename="arc-backup-' + date + '.json"',
+        },
+      });
+    }
+
     if (url.pathname === '/auth') return this.handleAuth(request, url);
 
     if ((request.headers.get('Upgrade') || '').toLowerCase() === 'websocket') {
@@ -1645,6 +1702,84 @@ export class ChatHub {
           this.sendTo(authorKey, { t: 'notice', text: 'Владелец удалил ваше сообщение' });
         }
       }
+      return;
+    }
+
+    // ------------------------------------------------------- бэкапы и пароли
+    if (kind === 'backup_list') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Резервные копии доступны только владельцу' });
+        return;
+      }
+      this.sendTo(key, await this.backupList());
+      return;
+    }
+
+    if (kind === 'backup_now') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Резервные копии доступны только владельцу' });
+        return;
+      }
+      const made = await this.backupNow();
+      this.sendTo(key, { t: 'notice', text: 'Копия за ' + made.date + ' создана' });
+      this.sendTo(key, await this.backupList());
+      return;
+    }
+
+    if (kind === 'backup_restore') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Восстановление доступно только владельцу' });
+        return;
+      }
+      const date = String(value.date || '').trim();
+      const res = await this.restoreBackup(date);
+      if (!res.ok) {
+        this.sendTo(key, { t: 'error', text: res.error });
+        return;
+      }
+      this.sendTo(key, { t: 'notice', text: 'Состояние восстановлено из копии за ' + res.date });
+      this.sendTo(key, await this.backupList());
+      // У остальных участников могла измениться лента — просим перечитать.
+      this.broadcast({ t: 'channels', channels: this.store.channels });
+      return;
+    }
+
+    // Владелец задаёт участнику временный пароль: забытый пароль иначе не вернуть.
+    if (kind === 'password_reset') {
+      if (!this.isOwner(key)) {
+        this.sendTo(key, { t: 'error', text: 'Сбросить пароль может только владелец' });
+        return;
+      }
+      const target = this.findUserKey(value.name);
+      if (!target) {
+        this.sendTo(key, { t: 'error', text: 'Такого пользователя нет' });
+        return;
+      }
+      const user2 = this.store.users[target];
+      if (!user2) return;
+      const bytes = crypto.getRandomValues(new Uint8Array(8));
+      let temp = '';
+      for (const b of bytes) temp += TEMP_PASSWORD_CHARS[b % TEMP_PASSWORD_CHARS.length];
+      user2.salt = randomHex(16);
+      user2.pass = await hashPassword(temp, user2.salt);
+      user2.algo = 'pbkdf2';
+      // Все сессии участника закрываем: старый пароль больше не действует.
+      for (const [tk, ownerKey] of Object.entries(this.store.tokens)) {
+        if (ownerKey === target) {
+          delete this.store.tokens[tk];
+          if (this.store.tokenAt) delete this.store.tokenAt[tk];
+        }
+      }
+      await this.save();
+      for (const ws of this.sockets(target)) {
+        try { ws.close(1000, 'password reset'); } catch (_) { /* уже закрыт */ }
+      }
+      this.sendTo(key, {
+        t: 'password_reset_done',
+        name: user2.name,
+        password: temp,
+        text: 'Новый пароль для ' + user2.name + ': ' + temp + ' — передайте его лично, он показывается один раз',
+      });
       return;
     }
 
@@ -2338,15 +2473,109 @@ export class ChatHub {
     } catch (_) { /* старые версии storage без alarm */ }
   }
 
+  // ------------------------------------------------------------- бэкапы
+  // Каждый день кладём снимок базы в хранилище объекта под ключ bkp:<дата>.
+  // Храним BACKUP_KEEP штук: этого хватает, чтобы откатить неудачную правку.
+  backupDate(stamp) {
+    const d = new Date(stamp || now());
+    const pad = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+
+  async backupNow(forceKey) {
+    const date = forceKey || this.backupDate();
+    // В снимок не кладём токены и счётчики перебора: после восстановления
+    // сессии должны остаться текущими, а не «воскреснуть» старые.
+    const clone = JSON.parse(JSON.stringify(this.store));
+    delete clone.tokens;
+    delete clone.tokenAt;
+    delete clone.rates;
+    delete clone.authFails;
+    const text = JSON.stringify(clone);
+    await this.state.storage.put('bkp:' + date, text);
+    await this.state.storage.put('bkpMeta:' + date, {
+      date,
+      ts: now(),
+      bytes: text.length,
+      users: Object.keys(clone.users || {}).length,
+      messages: Object.values(clone.rooms || {}).reduce((sum, list) => sum + (Array.isArray(list) ? list.length : 0), 0),
+    });
+    this.store.lastBackup = date;
+    await this.save();
+    await this.trimBackups();
+    return { date, bytes: text.length };
+  }
+
+  async trimBackups() {
+    const all = await this.state.storage.list({ prefix: 'bkpMeta:' });
+    const dates = [...all.keys()].map((k) => k.slice('bkpMeta:'.length)).sort().reverse();
+    for (const date of dates.slice(BACKUP_KEEP)) {
+      await this.state.storage.delete('bkp:' + date);
+      await this.state.storage.delete('bkpMeta:' + date);
+    }
+  }
+
+  async backupList() {
+    const all = await this.state.storage.list({ prefix: 'bkpMeta:' });
+    const items = [...all.values()].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return { t: 'backup_state', items, lastBackup: this.store.lastBackup || '', keep: BACKUP_KEEP };
+  }
+
+  // Восстановление: подменяем состояние снимком, но оставляем текущие сессии.
+  async restoreBackup(date) {
+    const text = await this.state.storage.get('bkp:' + date);
+    if (!text) return { ok: false, error: 'Снимка за ' + date + ' нет' };
+    let snapshot = null;
+    try { snapshot = JSON.parse(text); } catch (_) { return { ok: false, error: 'Снимок повреждён' }; }
+    if (!snapshot || !snapshot.users) return { ok: false, error: 'Снимок повреждён' };
+    const tokens = this.store.tokens;
+    const tokenAt = this.store.tokenAt;
+    const rates = this.store.rates;
+    // Перед восстановлением сохраняем текущее состояние — на случай отмены.
+    await this.backupNow('before-restore-' + this.backupDate());
+    this.store = snapshot;
+    this.store.tokens = tokens || {};
+    this.store.tokenAt = tokenAt || {};
+    this.store.rates = rates || {};
+    this.loading = null;
+    await this.ensure();
+    await this.save();
+    this.broadcast(this.presencePayload());
+    this.broadcast({ t: 'channels', channels: this.store.channels });
+    return { ok: true, date };
+  }
+
+  // Раз в сутки: если снимка за сегодня нет — делаем.
+  async maybeDailyBackup() {
+    const today = this.backupDate();
+    const exists = await this.state.storage.get('bkpMeta:' + today);
+    if (!exists) await this.backupNow(today);
+    if (this.store.lastBackup !== today) {
+      this.store.lastBackup = today;
+      await this.save();
+    }
+  }
+
+  // Alarm — единственный таймер объекта: обслуживает и Matrix, и бэкап.
   async alarm() {
     await this.ensure();
-    const cfg = this.store.matrix;
-    if (!cfg || !cfg.enabled) return;
     try {
-      await this.matrixPull();
-    } finally {
-      if (this.store.matrix && this.store.matrix.enabled) await this.armMatrixAlarm();
+      await this.maybeDailyBackup();
+    } catch (_) { /* бэкап не должен ломать мост */ }
+    const cfg = this.store.matrix;
+    if (cfg && cfg.enabled) {
+      try {
+        await this.matrixPull();
+      } catch (_) { /* ошибки моста уже логируются внутри */ }
+      if (this.store.matrix && this.store.matrix.enabled) {
+        await this.armMatrixAlarm();
+        return;
+      }
     }
+    // Мост выключен — будим себя через сутки, чтобы бэкап шёл сам.
+    try {
+      await this.state.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
+    } catch (_) { /* storage без alarm */ }
   }
 
   async webSocketClose(ws) {

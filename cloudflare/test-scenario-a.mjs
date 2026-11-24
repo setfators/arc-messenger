@@ -1,7 +1,7 @@
 // Проверки сценария A: приглашения, права владельца, антифлуд, экспорт.
 const B = process.env.BASE || 'http://127.0.0.1:8798';
 const WSURL = B.replace('http', 'ws');
-const WebSocket = (await import('file:///C:/Users/setfators/Desktop/rust-messenger/cloudflare/node_modules/ws/index.js')).default;
+import WebSocket from 'ws';
 const stamp = Date.now().toString(36);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const problems = [];

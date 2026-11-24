@@ -1,13 +1,10 @@
 // Проверка клиента: грузим index.html в jsdom и гоняем сценарии протокола.
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { CLIENT_HTML, loadJsdom } from './test-helpers.mjs';
 
-const require = createRequire(pathToFileURL('C:/Users/setfators/Desktop/rust-messenger/cloudflare/test-client.mjs'));
-const jsdomPath = process.env.JSDOM_DIR || 'C:/Users/setfators/AppData/Local/Temp/jsdomtest/node_modules/jsdom';
-const { JSDOM, VirtualConsole } = require(jsdomPath);
+const { JSDOM, VirtualConsole } = loadJsdom();
 
-const html = readFileSync('C:/Users/setfators/Desktop/rust-messenger/cloudflare/public/index.html', 'utf8');
+const html = readFileSync(CLIENT_HTML, 'utf8');
 
 const problems = [];
 const vc = new VirtualConsole();
@@ -133,6 +130,9 @@ check('кнопка удаления только у своих', doc.querySelec
 check('join отправлен после hello', ws.sent.some((m) => m.t === 'join'), JSON.stringify(ws.sent));
 
 // --- сообщение в открытом канале ---------------------------------------------
+// Окно считаем активным: иначе поведение зависит от версии jsdom
+// (document.hasFocus() по умолчанию различается).
+doc.hasFocus = () => true;
 const notifBefore = notifications.length;
 ws.push({ t: 'msg', id: 3, room: 'obshiy', author: 'boris', text: 'ещё раз', ts: Date.now(), authorProfile: { displayName: 'Борис' } });
 await new Promise((r) => setTimeout(r, 30));

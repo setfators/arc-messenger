@@ -45,3 +45,7 @@ wrangler.toml.bak
 .env
 .DS_Store
 Thumbs.db
+# Генерируется npx cap sync
+cloudflare/mobile/android/app/src/main/res/xml/config.xml
+# Результат npm run deploy:dry
+cloudflare/dist-check/
