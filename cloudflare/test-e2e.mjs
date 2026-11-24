@@ -100,7 +100,7 @@ check('клиент подключился к серверу', $('#auth').classL
 check('новому человеку показан экран знакомства', !!$('#welcome') && !$('#welcome').classList.contains('hidden'), '');
 check('в списке есть демо-канал', texts('#channels .nm').includes('Добро пожаловать'), texts('#channels .nm').join('|'));
 check('личные сообщения идут первыми в списке', !!$('#dmList'));
-check('клиент знает свою версию', doc.documentElement.innerHTML.includes("APP_VERSION = '1.6.0'"), '');
+check('клиент знает свою версию', doc.documentElement.innerHTML.includes("APP_VERSION = '1.7.0'"), '');
 
 // 2.1. Кнопка «Открыть демо-канал» показывает экскурсию и скрывает знакомство.
 $('#wcDemo').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));

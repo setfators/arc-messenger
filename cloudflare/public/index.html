@@ -916,7 +916,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -4169,7 +4169,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.6.0.apk');
+  apkLink.setAttribute('download', 'Arc-1.7.0.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';

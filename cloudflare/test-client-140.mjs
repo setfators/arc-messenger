@@ -74,11 +74,11 @@ function check(name, cond, extra) {
 
 await sleep(150);
 const ws = sockets[0];
-check('версия клиента 1.6.0', window.APP_VERSION === '1.6.0' || $('body').textContent.includes('1.6.0'), 'APP_VERSION');
+check('версия клиента 1.7.0', window.APP_VERSION === '1.7.0' || $('body').textContent.includes('1.7.0'), 'APP_VERSION');
 ws.open();
 
 ws.push({
-  t: 'hello', version: '1.6.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
+  t: 'hello', version: '1.7.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
   me: { name: 'anna', color: '#5865f2', profile: { displayName: 'Анна', avatarUrl: '' }, status: 'online', settings: { status: 'online' } },
   channels: ['obshiy'],
   channelItems: [{ room: 'obshiy', title: 'obshiy', owner: 'anna', ownerKey: 'anna', mine: true, count: 1, members: [{ name: 'anna', displayName: 'Анна', online: true }] }],
@@ -205,7 +205,7 @@ if (accountTabBtn) {
   accountTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await sleep(60);
   const bodyText = ($('#settingsBody') ? $('#settingsBody').textContent : '') || '';
-  check('в аккаунте видна версия', /1\.6\.\d+/.test(bodyText), bodyText.slice(0, 200));
+  check('в аккаунте видна версия', /1\.7\.\d+/.test(bodyText), bodyText.slice(0, 200));
   const passInputs = [...doc.querySelectorAll('#settingsBody input[type="password"]')];
   check('три поля для смены пароля', passInputs.length >= 3, 'inputs=' + passInputs.length);
   if (passInputs.length >= 3) {
