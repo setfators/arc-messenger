@@ -101,6 +101,10 @@ ws.push({
   t: 'hello',
   me: { name: 'anna', color: '#5865f2', profile: { displayName: 'Анна', avatarUrl: '' }, status: 'online', settings: { status: 'online' } },
   channels: ['obshiy', 'games'],
+  channelItems: [
+    { room: 'obshiy', title: 'obshiy', owner: 'anna', ownerKey: 'anna', mine: true, count: 1, members: [{ name: 'anna', displayName: 'Анна', online: true }] },
+    { room: 'games', title: 'games', owner: 'boris', ownerKey: 'boris', mine: false, count: 2, members: [{ name: 'anna', displayName: 'Анна', online: true }, { name: 'boris', displayName: 'Борис', online: true }] },
+  ],
 });
 ws.push({ t: 'dm_list', items: [{ room: 'dm:anna|boris', name: 'boris', displayName: 'Борис', avatarUrl: '', last_ts: 1 }] });
 ws.push({
@@ -119,7 +123,8 @@ ws.push({ t: 'history', room: 'obshiy', messages: [
 ] });
 await new Promise((r) => setTimeout(r, 60));
 
-check('каналы отрисованы', texts('#channels .nm').join(',') === '# obshiy,# games', texts('#channels .nm').join(','));
+check('каналы отрисованы', texts('#channels .nm').join(',') === 'obshiy,games', texts('#channels .nm').join(','));
+check('канал помечен приватным', doc.querySelectorAll('#channels .lock').length === 2, 'lock=' + doc.querySelectorAll('#channels .lock').length);
 check('друзья отрисованы (объекты из протокола)', texts('#friendList .nm').join('|').includes('Борис'), texts('#friendList .nm').join('|'));
 check('в друзьях есть статус', texts('#friendList .st').includes('не беспокоить'), texts('#friendList .st').join('|'));
 check('приватный статус друга не «в сети» у офлайн', texts('#friendList .st').includes('не в сети'), texts('#friendList .st').join('|'));

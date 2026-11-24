@@ -72,32 +72,46 @@ check('участник не владелец', guest.data.isOwner === false, JS
 const gws = await open(guest.data.token);
 await waitFor(gws, (m) => m.t === 'hello');
 
-// 3. Модерация: каналы.
+// 3. Каналы теперь приватные: свой участник создаёт и удаляет сам,
+//    а чужой не может удалить даже владелец сервера.
 gws.ws.send(JSON.stringify({ t: 'create', room: 'room' + stamp }));
 const createdRoom = await waitFor(gws, (m) => m.t === 'channel_created');
-const roomName = createdRoom && createdRoom.room ? createdRoom.room : 'room' + stamp;
-check('участник может создать канал', !!createdRoom, JSON.stringify(createdRoom));
-gws.ws.send(JSON.stringify({ t: 'channel_delete', room: roomName }));
-const denyDelete = await waitFor(gws, (m) => m.t === 'error' && /владелец/.test(m.text || ''));
-check('участник не может удалить канал', !!denyDelete, JSON.stringify(gws.got.filter((m) => m.t === 'error').map((m) => m.text)));
+const ownRoom = createdRoom && createdRoom.room;
+check('участник может создать канал', !!ownRoom, JSON.stringify(createdRoom));
+gws.ws.send(JSON.stringify({ t: 'channel_delete', room: ownRoom }));
+const goneOwn = await waitFor(gws, (m) => m.t === 'channels' && !(m.channels || []).includes(ownRoom));
+check('создатель удаляет свой канал', !!goneOwn, JSON.stringify(goneOwn && goneOwn.channels));
+gws.ws.send(JSON.stringify({ t: 'create', room: 'room2' + stamp }));
+const createdRoom2 = await waitFor(gws, (m) => m.t === 'channel_created' && m.room !== ownRoom);
+const guestRoom = createdRoom2 && createdRoom2.room;
+check('участник создаёт второй канал', !!guestRoom, JSON.stringify(createdRoom2));
+ows.ws.send(JSON.stringify({ t: 'channel_delete', room: guestRoom }));
+const denyDelete = await waitFor(ows, (m) => m.t === 'error' && /создатель/.test(m.text || ''));
+check('чужой канал удалить нельзя', !!denyDelete, JSON.stringify(ows.got.filter((m) => m.t === 'error').map((m) => m.text)));
 
-// 4. Модерация: чужие сообщения.
-gws.ws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: 'сообщение участника ' + stamp }));
+// 4. Модерация: владелец создаёт канал, зовёт участника и удаляет его сообщение.
+ows.ws.send(JSON.stringify({ t: 'create', room: 'модерация ' + stamp, title: 'модерация ' + stamp }));
+const modCreated = await waitFor(ows, (m) => m.t === 'channel_created');
+const room = modCreated && modCreated.room;
+check('канал для модерации создан', !!room, JSON.stringify(modCreated));
+ows.ws.send(JSON.stringify({ t: 'channel_add', room, name: guestName }));
+await waitFor(gws, (m) => m.t === 'channels' && (m.channels || []).includes(room));
+gws.ws.send(JSON.stringify({ t: 'msg', room, text: 'сообщение участника ' + stamp }));
 const guestMsg = await waitFor(ows, (m) => m.t === 'msg' && m.text === 'сообщение участника ' + stamp);
 check('сообщение участника дошло до владельца', !!guestMsg, '');
 if (guestMsg) {
-  ows.ws.send(JSON.stringify({ t: 'msg_delete', room: 'obshiy', id: guestMsg.id }));
+  ows.ws.send(JSON.stringify({ t: 'msg_delete', room, id: guestMsg.id }));
   const removed = await waitFor(gws, (m) => m.t === 'msg_delete' && m.id === guestMsg.id);
-  check('владелец удаляет чужое сообщение', !!removed, JSON.stringify(gws.got.filter((m) => m.t === 'msg_delete')));
+  check('владелец канала удаляет чужое сообщение', !!removed, JSON.stringify(gws.got.filter((m) => m.t === 'msg_delete')));
   await sleep(200);
-  const told = gws.got.some((m) => m.t === 'notice' && /владелец удалил/i.test(m.text || ''));
+  const told = gws.got.some((m) => m.t === 'notice' && /удалил ваше сообщение/i.test(m.text || ''));
   check('автору сообщают об удалении', told, JSON.stringify(gws.got.filter((m) => m.t === 'notice').map((m) => m.text)));
 }
 
 // 5. Антифлуд: 15 сообщений за 10 секунд — дальше отказ.
 const before = gws.got.length;
 for (let i = 0; i < 22; i += 1) {
-  gws.ws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: 'флуд ' + i + ' ' + stamp }));
+  gws.ws.send(JSON.stringify({ t: 'msg', room, text: 'флуд ' + i + ' ' + stamp }));
 }
 await sleep(1500);
 const floodErrors = gws.got.slice(before).filter((m) => m.t === 'error' && /Слишком часто/.test(m.text || ''));

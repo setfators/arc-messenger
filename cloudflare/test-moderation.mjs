@@ -55,6 +55,16 @@ const mws = await open(member.data.token);
 await waitFor(sws, (m) => m.t === 'hello');
 await waitFor(mws, (m) => m.t === 'hello');
 
+// Приватный канал для проверок: создаёт владелец, зовёт сотрудника и участника.
+ows.ws.send(JSON.stringify({ t: 'create', room: 'модерация ' + stamp, title: 'модерация ' + stamp }));
+const chCreated = await waitFor(ows, (m) => m.t === 'channel_created');
+const room = chCreated && chCreated.room;
+check('канал для модерации создан', !!room, JSON.stringify(chCreated));
+ows.ws.send(JSON.stringify({ t: 'channel_add', room, name: staffUser }));
+ows.ws.send(JSON.stringify({ t: 'channel_add', room, name: memberUser }));
+await waitFor(sws, (m) => m.t === 'channels' && (m.channels || []).includes(room));
+await waitFor(mws, (m) => m.t === 'channels' && (m.channels || []).includes(room));
+
 // 2. Назначение сотрудником.
 ows.ws.send(JSON.stringify({ t: 'staff_add', name: staffUser }));
 const roleChanged = await waitFor(sws, (m) => m.t === 'role_changed');
@@ -67,11 +77,11 @@ check('список команды содержит сотрудника', !!(li
 check('в списке есть владелец', !!(list && list.owner), '');
 
 // 3. Сотрудник удаляет чужое сообщение.
-mws.ws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: 'сообщение участника ' + stamp }));
+mws.ws.send(JSON.stringify({ t: 'msg', room, text: 'сообщение участника ' + stamp }));
 const memberMsg = await waitFor(sws, (m) => m.t === 'msg' && m.text === 'сообщение участника ' + stamp);
 check('сообщение участника видно', !!memberMsg, '');
 if (memberMsg) {
-  sws.ws.send(JSON.stringify({ t: 'msg_delete', room: 'obshiy', id: memberMsg.id }));
+  sws.ws.send(JSON.stringify({ t: 'msg_delete', room, id: memberMsg.id }));
   const removed = await waitFor(mws, (m) => m.t === 'msg_delete' && m.id === memberMsg.id);
   check('сотрудник удаляет чужое сообщение', !!removed, '');
 }
@@ -81,13 +91,13 @@ sws.ws.send(JSON.stringify({ t: 'user_mute', name: memberUser, minutes: 10 }));
 const muted = await waitFor(mws, (m) => m.t === 'notice' && /запрещено писать/.test(m.text || ''));
 check('мьют доходит до участника', !!muted, JSON.stringify(mws.got.filter((m) => m.t === 'notice').map((m) => m.text)));
 
-mws.ws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: 'после мьюта ' + stamp }));
+mws.ws.send(JSON.stringify({ t: 'msg', room, text: 'после мьюта ' + stamp }));
 const blocked = await waitFor(mws, (m) => m.t === 'error' && /запрещено писать/.test(m.text || ''));
 check('замьюченный не может писать', !!blocked, JSON.stringify(mws.got.filter((m) => m.t === 'error').map((m) => m.text)));
 
 sws.ws.send(JSON.stringify({ t: 'user_unmute', name: memberUser }));
 await sleep(400);
-mws.ws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: 'после снятия ' + stamp }));
+mws.ws.send(JSON.stringify({ t: 'msg', room, text: 'после снятия ' + stamp }));
 const afterUnmute = await waitFor(sws, (m) => m.t === 'msg' && m.text === 'после снятия ' + stamp);
 check('после снятия мьюта можно писать', !!afterUnmute, '');
 

@@ -95,6 +95,7 @@ jobs:
           run_suite edit test-edit.mjs
           run_suite calls test-call.mjs
           run_suite channels test-channels.mjs
+          run_suite private test-private.mjs
           run_suite e2e test-e2e.mjs
 
       - name: Логи wrangler при падении

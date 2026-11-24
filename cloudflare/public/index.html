@@ -204,6 +204,42 @@
   .chan.active .del { opacity: .7; }
   .chan .del:hover { opacity: 1; background: var(--danger); color: #fff; }
   .side-add:hover { border-color: var(--accent); color: var(--text); }
+
+  /* ---------- приватные каналы 1.5.0 ---------- */
+  .side-hint { text-transform: none; letter-spacing: 0; font-size: 10px; opacity: .65; }
+  .chan .lock { font-size: 11px; opacity: .75; flex: 0 0 auto; }
+  .chan .cnt { font-size: 11px; color: var(--muted); flex: 0 0 auto; }
+  .chan-dlg { width: min(480px, 100%); max-height: 92vh; overflow-y: auto; }
+  .chan-top { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
+  .chan-top .grow { flex: 1; min-width: 0; }
+  .chan-top h3 { margin: 0 0 3px; font-size: 17px; overflow: hidden; text-overflow: ellipsis; }
+  .chan-sub { margin: 0; color: var(--muted); font-size: 12px; }
+  .chan-count { color: var(--muted); font-weight: 400; }
+  .chan-people { display: flex; flex-direction: column; gap: 2px; }
+  .crow { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 8px; }
+  .crow:hover { background: var(--panel2); }
+  .crow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  .crow .tag { font-size: 11px; color: var(--muted); }
+  .crow .rm {
+    width: 22px; height: 22px; border-radius: 6px; border: none;
+    background: transparent; color: var(--muted); font-size: 11px;
+  }
+  .crow .rm:hover { background: var(--danger); color: #fff; }
+  .chan-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .chan-row input {
+    flex: 1; min-width: 0; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); outline: none;
+  }
+  .chan-row input:focus { border-color: var(--accent); }
+  .chan-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pick {
+    border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+    border-radius: 999px; padding: 5px 10px; font-size: 12px;
+  }
+  .pick:hover { border-color: var(--accent); }
+  .chan-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  .chan-dlg .hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+
   .dlg {
     width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line);
     border-radius: 14px; padding: 20px; box-shadow: 0 24px 60px rgba(0,0,0,.5);
@@ -583,11 +619,11 @@
   <aside class="side" id="side">
     <div class="side-head" id="sideTitle">Каналы</div>
     <div class="side-scroll">
-      <div class="side-label">Текстовые каналы</div>
-      <div id="channels"></div>
-      <button class="side-add" id="newChannel">+ создать канал</button>
       <div class="side-label">Личные сообщения</div>
       <div id="dmList"></div>
+      <div class="side-label">Каналы <span class="side-hint">приватные</span></div>
+      <div id="channels"></div>
+      <button class="side-add" id="newChannel">+ создать канал</button>
     </div>
     <div class="voice-box hidden" id="voiceBox">
       <div class="voice-head" id="voiceHead">Голосовой канал</div>
@@ -603,7 +639,8 @@
 
   <main class="main">
     <header class="topbar">
-      <div class="tt" id="topTitle"># obshiy</div>
+      <div class="tt" id="topTitle">Arc</div>
+      <button class="tb-btn hidden" id="chanMembers" type="button" title="Участники канала">👥 <span id="chanMembersCount"></span></button>
       <div class="pill" id="connState">подключение…</div>
       <button class="tb-btn" id="searchBtn" type="button" title="Поиск по истории">🔍</button>
       <button class="tb-btn hidden" id="callBtn" type="button" title="Позвонить">📞</button>
@@ -726,10 +763,46 @@
     </div>
   </div>
 </div>
+<!-- Панель канала: участники, приглашения, переименование, выход. -->
+<div class="modal-back hidden" id="chanModal">
+  <div class="dlg chan-dlg" role="dialog" aria-label="Канал">
+    <div class="chan-top">
+      <div class="grow">
+        <h3 id="chanTitle"># канал</h3>
+        <p class="chan-sub" id="chanSub">Приватный канал — его видят только участники</p>
+      </div>
+      <button class="x-btn" id="chanClose" title="Закрыть">✕</button>
+    </div>
+    <div class="sect">
+      <h4>Участники <span id="chanCount" class="chan-count"></span></h4>
+      <div id="chanMembersList" class="chan-people"></div>
+    </div>
+    <div class="sect hidden" id="chanAddSect">
+      <h4>Добавить в канал</h4>
+      <div class="chan-row">
+        <input id="chanAddName" placeholder="Имя друга" maxlength="20" autocomplete="off">
+        <button class="primary" id="chanAddBtn" type="button">Добавить</button>
+      </div>
+      <div id="chanPicks" class="chan-picks"></div>
+      <p class="hint" id="chanAddHint"></p>
+    </div>
+    <div class="sect hidden" id="chanRenameSect">
+      <h4>Название канала</h4>
+      <div class="chan-row">
+        <input id="chanRename" maxlength="60" autocomplete="off">
+        <button class="pill" id="chanRenameBtn" type="button">Сохранить</button>
+      </div>
+    </div>
+    <div class="chan-actions">
+      <button class="pill hidden" id="chanLeave" type="button">Покинуть канал</button>
+      <button class="pill danger hidden" id="chanDelete" type="button">Удалить канал</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.5.0';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -757,9 +830,12 @@ const store = {
   inviteOnly: true,
   invites: [],
   channels: [],
-  room: 'obshiy',
+  // Приватные каналы (1.5.0): у каждого свой создатель и список участников.
+  channelItems: [],
+  panelRoom: null,
+  room: null,
   roomKind: 'channel',
-  roomTitle: '# obshiy',
+  roomTitle: '',
   messages: {},
   friends: { friends: [], incoming: [], outgoing: [] },
   online: [],
@@ -1118,6 +1194,7 @@ function handle(data) {
       store.role = data.role || (store.isOwner ? 'owner' : 'member');
       store.inviteOnly = data.inviteOnly !== false;
       store.channels = data.channels || [];
+      store.channelItems = Array.isArray(data.channelItems) ? data.channelItems : [];
       store.reconnectTries = 0;
       store.lastSeen = Date.now();
       store.pushKey = data.pushKey ? String(data.pushKey) : '';
@@ -1140,11 +1217,24 @@ function handle(data) {
       renderMe();
       renderChannels();
       const params = new URLSearchParams(location.search);
-      if (params.get('room') && store.channels.indexOf(params.get('room')) >= 0) {
-        openRoom(params.get('room'), 'channel', '# ' + params.get('room'));
+      const wanted = params.get('room');
+      if (wanted && store.channels.indexOf(wanted) >= 0) {
+        openRoom(wanted, 'channel', '# ' + channelTitleOf(wanted));
+      } else if (wanted && wanted.indexOf('dm:') === 0) {
+        const dmItem = (store.dms || []).find((one) => one.room === wanted);
+        if (dmItem) openRoom(wanted, 'dm', '@ ' + displayNameOf(dmItem.name, dmItem), dmItem.name);
+      }
+      // Канал могли удалить или убрать из него, пока приложение было закрыто.
+      if (store.roomKind === 'channel' && store.room && store.channels.indexOf(store.room) < 0) {
+        store.room = null;
+      }
+      // Если ничего не открыто, а свои каналы есть — открываем первый.
+      if (!store.room) {
+        if (store.channels.length) openRoom(store.channels[0], 'channel', '# ' + channelTitleOf(store.channels[0]));
+        else showNoChannels();
       }
       if (params.get('settings')) setTimeout(() => openSettings(currentTab), 60);
-      send({ t: 'join', room: store.room });
+      if (store.room) send({ t: 'join', room: store.room });
       if (store.voiceRoom) send({ t: 'voice_join', room: store.voiceRoom });
       askNotifyPermission();
       maybeSubscribePush();
@@ -1152,27 +1242,44 @@ function handle(data) {
     }
     case 'channels': {
       store.channels = data.channels || [];
+      store.channelItems = Array.isArray(data.items) ? data.items : [];
       if (store.voiceRoom && store.channels.indexOf(store.voiceRoom) < 0) {
-        // Канал удалили, пока мы в нём сидели: выключаем микрофон и экран.
+        // Канал удалили или убрали из него: выключаем микрофон и экран.
         leaveVoice(true);
       }
       for (const room of Object.keys(store.unread || {})) {
         if (!room.startsWith('dm:') && store.channels.indexOf(room) < 0) delete store.unread[room];
       }
       updateTitle();
+      if (store.panelRoom && !channelByRoom(store.panelRoom)) closeChannelPanel();
       if (store.roomKind === 'channel' && store.room && store.channels.indexOf(store.room) < 0) {
-        // Канал удалили: переходим к первому оставшемуся. Если каналов нет
-        // вовсе (владелец удалил даже общий) — показываем пустое состояние.
-        if (store.channels.length) openRoom(store.channels[0], 'channel', '# ' + store.channels[0]);
+        // Канал пропал: переходим к первому оставшемуся. Если каналов нет
+        // вовсе — показываем подсказку, личные чаты остаются на месте.
+        if (store.channels.length) openRoom(store.channels[0], 'channel', '# ' + channelTitleOf(store.channels[0]));
         else showNoChannels();
       } else {
         renderChannels();
+        if (channelPanelOpen()) renderChannelPanel();
       }
       break;
     }
     case 'channel_created': {
       if (data.room && store.channels.indexOf(data.room) >= 0) {
-        openRoom(data.room, 'channel', '# ' + data.room);
+        openRoom(data.room, 'channel', '# ' + channelTitleOf(data.room));
+      }
+      break;
+    }
+    case 'channel_added': {
+      // Меня добавили в канал: об этом уже пришло обычное уведомление,
+      // а список каналов обновится событием 'channels'.
+      break;
+    }
+    case 'channel_removed': {
+      if (store.panelRoom && data.room === store.panelRoom) closeChannelPanel();
+      if (data.room && store.roomKind === 'channel' && data.room === store.room) {
+        const left = (store.channels || []).filter((room) => room !== data.room);
+        if (left.length) openRoom(left[0], 'channel', '# ' + channelTitleOf(left[0]));
+        else showNoChannels();
       }
       break;
     }
@@ -1489,61 +1596,75 @@ function handle(data) {
   }
 }
 
-/* ------------------------------------------------------------------ каналы и друзья */
+/* ------------------------------------ каналы (приватные, 1.5.0) и друзья */
+function channelByRoom(room) {
+  return (store.channelItems || []).find((one) => one && one.room === room) || null;
+}
+function channelTitleOf(room) {
+  const one = channelByRoom(room);
+  return one && one.title ? one.title : String(room || '');
+}
+function channelMembersOf(room) {
+  const one = channelByRoom(room);
+  return one && Array.isArray(one.members) ? one.members : [];
+}
+// Файлы вложений приватные: к ссылке добавляем свой токен, иначе сервер
+// откажется отдавать картинку чужому человеку.
+function mediaUrl(meta) {
+  if (!meta || !meta.url) return '';
+  const url = netUrl(meta.url);
+  if (!store.token) return url;
+  return url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + encodeURIComponent(store.token);
+}
+
+function channelRow(item) {
+  const room = item.room;
+  const btn = document.createElement('button');
+  btn.className = 'chan' + (store.roomKind === 'channel' && store.room === room ? ' active' : '');
+  const lock = el('span', 'lock', '🔒');
+  lock.title = 'Приватный канал: его видят только участники';
+  btn.appendChild(lock);
+  const nm = el('span', 'nm', item.title || room);
+  nm.title = '#' + room;
+  btn.appendChild(nm);
+
+  const unread = unreadOf(room);
+  if (unread) {
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = unread > 99 ? '99+' : String(unread);
+    btn.appendChild(badge);
+  }
+
+  const cnt = el('span', 'cnt', String(item.count || 1));
+  cnt.title = 'Участников: ' + (item.count || 1);
+  btn.appendChild(cnt);
+
+  const inThis = store.voiceRoom === room;
+  const mic = el('span', 'mic', inThis ? '🔊' : '🎧');
+  mic.title = inThis ? 'Вы в голосовом канале' : 'Войти в голосовой канал';
+  mic.onclick = (e) => {
+    e.stopPropagation();
+    inThis ? leaveVoice() : joinVoice(room);
+  };
+  btn.appendChild(mic);
+  btn.onclick = () => openRoom(room, 'channel', '# ' + (item.title || room));
+  return btn;
+}
+
 function renderChannels() {
   const box = $('channels');
   box.innerHTML = '';
-  if (!store.channels.length) {
-    // Каналов нет — подсказываем, что делать, вместо пустого списка.
-    box.appendChild(el('div', 'empty', 'Каналов нет — создайте первый'));
+  const items = store.channelItems || [];
+  const mine = items.filter((one) => one.mine);
+  const joined = items.filter((one) => !one.mine);
+  if (!items.length) {
+    box.appendChild(el('div', 'empty', 'Создайте канал — его увидите только вы и те, кого вы позовёте'));
   }
-  for (const channel of store.channels) {
-    const btn = document.createElement('button');
-    btn.className = 'chan' + (store.roomKind === 'channel' && store.room === channel ? ' active' : '');
-    const nm = document.createElement('span');
-    nm.className = 'nm';
-    nm.textContent = '# ' + channel;
-    btn.appendChild(nm);
-
-    const unread = unreadOf(channel);
-    if (unread) {
-      const badge = document.createElement('span');
-      badge.className = 'badge';
-      badge.textContent = unread > 99 ? '99+' : String(unread);
-      btn.appendChild(badge);
-    }
-
-    const inThis = store.voiceRoom === channel;
-    const mic = document.createElement('span');
-    mic.className = 'mic';
-    mic.textContent = inThis ? '🔊' : '🎧';
-    mic.title = inThis ? 'Вы в голосовом канале' : 'Войти в голосовой канал';
-    mic.onclick = (e) => {
-      e.stopPropagation();
-      inThis ? leaveVoice() : joinVoice(channel);
-    };
-    btn.appendChild(mic);
-
-    if (channel !== 'obshiy' && store.isOwner) {
-      const del = document.createElement('button');
-      del.className = 'del';
-      del.type = 'button';
-      del.title = 'Удалить чат';
-      del.textContent = '✕';
-      del.onclick = async (e) => {
-        e.stopPropagation();
-        const ok = await openDialog({
-          title: 'Удалить чат #' + channel + '?',
-          text: 'Чат исчезнет у всех участников вместе с сообщениями. Друзья и настройки не пострадают.',
-          ok: 'Удалить',
-          danger: true,
-        });
-        if (ok) send({ t: 'channel_delete', room: channel });
-      };
-      btn.appendChild(del);
-    }
-    btn.onclick = () => openRoom(channel, 'channel', '# ' + channel);
-    box.appendChild(btn);
+  for (const one of mine) box.appendChild(channelRow(one));
+  if (joined.length) {
+    box.appendChild(el('div', 'side-label', 'Где я участник'));
+    for (const one of joined) box.appendChild(channelRow(one));
   }
 
   const dms = $('dmList');
@@ -1598,30 +1719,33 @@ function renderChannels() {
   renderVoiceBox();
 }
 
-// Каналов не осталось: некуда писать, показываем подсказку.
+// Ни один канал не открыт: показываем подсказку, а личные чаты остаются слева.
 function showNoChannels() {
   store.room = null;
   store.roomKind = 'channel';
   store.roomTitle = 'Каналы';
   store.roomPeer = null;
   const title = $('topTitle');
-  if (title) title.textContent = 'Каналов нет';
+  if (title) title.textContent = 'Arc';
   const box = $('messages');
   if (box) {
     box.innerHTML = '';
     box.classList.remove('hidden');
-    box.appendChild(el('div', 'empty', 'Каналов нет. Нажмите «+ создать канал» слева — и можно писать.'));
+    box.appendChild(el('div', 'empty', 'Выберите чат слева. Личные сообщения работают как обычно, а канал можно создать кнопкой «+ создать канал» — его увидите только вы и те, кого вы позовёте.'));
   }
   const composer = $('composer');
   if (composer) composer.classList.add('hidden');
   const callBtn = $('callBtn');
   if (callBtn) callBtn.classList.add('hidden');
+  const membersBtn = $('chanMembers');
+  if (membersBtn) membersBtn.classList.add('hidden');
   renderChannels();
 }
 
 function openRoom(room, kind, title, peerName) {
   store.room = room || null;
   store.roomKind = kind;
+  if (kind === 'channel' && room) title = title || '# ' + channelTitleOf(room);
   store.roomTitle = title;
   store.roomPeer = peerName || null;
   $('topTitle').textContent = title;
@@ -1631,6 +1755,15 @@ function openRoom(room, kind, title, peerName) {
     const show = kind === 'dm' && !!peerName;
     callBtn.classList.toggle('hidden', !show);
     callBtn.onclick = show ? startDmCall : null;
+  }
+  // У канала в шапке видно, сколько человек в нём состоит.
+  const membersBtn = $('chanMembers');
+  if (membersBtn) {
+    const isChan = kind === 'channel' && !!channelByRoom(room);
+    membersBtn.classList.toggle('hidden', !isChan);
+    const countEl = $('chanMembersCount');
+    if (countEl) countEl.textContent = isChan ? String(channelMembersOf(room).length) : '';
+    membersBtn.onclick = isChan ? () => openChannelPanel(room) : null;
   }
   $('friendsPane').classList.add('hidden');
   $('messages').classList.remove('hidden');
@@ -1653,6 +1786,134 @@ function openRoom(room, kind, title, peerName) {
     send({ t: 'join', room });
   }
 }
+
+/* ------------------------------------------------ панель канала (1.5.0) */
+function channelPanelOpen() {
+  const back = $('chanModal');
+  return !!back && !back.classList.contains('hidden');
+}
+function closeChannelPanel() {
+  store.panelRoom = null;
+  const back = $('chanModal');
+  if (back) back.classList.add('hidden');
+}
+function openChannelPanel(room) {
+  if (!channelByRoom(room)) return;
+  store.panelRoom = room;
+  const back = $('chanModal');
+  if (!back) return;
+  back.classList.remove('hidden');
+  renderChannelPanel();
+}
+function renderChannelPanel() {
+  const room = store.panelRoom;
+  const one = channelByRoom(room);
+  if (!one) { closeChannelPanel(); return; }
+  $('chanTitle').textContent = '# ' + (one.title || room);
+  $('chanSub').textContent = one.mine
+    ? 'Вы создатель канала. Его видят только участники — позовите друзей.'
+    : 'Приватный канал. Создатель: ' + (one.owner || '—');
+  $('chanCount').textContent = '· ' + (one.count || 1);
+  const list = $('chanMembersList');
+  list.innerHTML = '';
+  for (const person of one.members || []) {
+    const row = document.createElement('div');
+    row.className = 'crow';
+    const dot = document.createElement('span');
+    dot.className = 'vdot';
+    dot.style.background = statusColor(person.name, person.online ? 'online' : 'offline');
+    row.appendChild(dot);
+    const nm = el('span', 'nm', displayNameOf(person.name, person) || person.name);
+    row.appendChild(nm);
+    if (person.name === one.owner) row.appendChild(el('span', 'tag', 'создатель'));
+    else if (person.online) row.appendChild(el('span', 'tag', 'в сети'));
+    if (one.mine && person.name !== one.owner) {
+      const rm = document.createElement('button');
+      rm.className = 'rm';
+      rm.type = 'button';
+      rm.title = 'Убрать из канала';
+      rm.textContent = '✕';
+      rm.onclick = async () => {
+        const ok = await openDialog({
+          title: 'Убрать ' + (displayNameOf(person.name, person) || person.name) + '?',
+          text: 'Человек потеряет доступ к каналу и не увидит переписку.',
+          ok: 'Убрать',
+          danger: true,
+        });
+        if (ok) send({ t: 'channel_kick', room, name: person.name });
+      };
+      row.appendChild(rm);
+    }
+    list.appendChild(row);
+  }
+  // Приглашать, переименовывать и удалять может только создатель.
+  $('chanAddSect').classList.toggle('hidden', !one.mine);
+  $('chanRenameSect').classList.toggle('hidden', !one.mine);
+  $('chanLeave').classList.toggle('hidden', !!one.mine);
+  $('chanDelete').classList.toggle('hidden', !one.mine);
+  if (one.mine) {
+    const inside = new Set((one.members || []).map((p) => String(p.name).toLowerCase()));
+    const picks = ((store.friends && store.friends.friends) || [])
+      .filter((f) => !inside.has(String(f.name).toLowerCase()));
+    const box = $('chanPicks');
+    box.innerHTML = '';
+    for (const friend of picks) {
+      const chip = document.createElement('button');
+      chip.className = 'pick';
+      chip.type = 'button';
+      chip.textContent = displayNameOf(friend.name, friend);
+      chip.onclick = () => send({ t: 'channel_add', room, name: friend.name });
+      box.appendChild(chip);
+    }
+    $('chanAddHint').textContent = picks.length
+      ? 'Нажмите на друга, чтобы сразу добавить его в канал.'
+      : 'Все друзья уже в канале. Можно вписать имя вручную выше.';
+    $('chanRename').value = one.title || room;
+  }
+}
+
+$('chanClose').onclick = () => closeChannelPanel();
+$('chanModal').onclick = (event) => {
+  if (event.target === $('chanModal')) closeChannelPanel();
+};
+$('chanAddBtn').onclick = () => {
+  const room = store.panelRoom;
+  const name = $('chanAddName').value.trim();
+  if (!room || !name) return;
+  send({ t: 'channel_add', room, name });
+  $('chanAddName').value = '';
+};
+$('chanAddName').onkeydown = (event) => {
+  if (event.key === 'Enter') { event.preventDefault(); $('chanAddBtn').click(); }
+};
+$('chanRenameBtn').onclick = () => {
+  const room = store.panelRoom;
+  const title = $('chanRename').value.trim();
+  if (!room || !title) return;
+  send({ t: 'channel_rename', room, title });
+};
+$('chanLeave').onclick = async () => {
+  const room = store.panelRoom;
+  if (!room) return;
+  const ok = await openDialog({
+    title: 'Покинуть канал #' + channelTitleOf(room) + '?',
+    text: 'Канал пропадёт из списка. Вернуться сможет только тот, кто вас позовёт снова.',
+    ok: 'Покинуть',
+    danger: true,
+  });
+  if (ok) { send({ t: 'channel_leave', room }); closeChannelPanel(); }
+};
+$('chanDelete').onclick = async () => {
+  const room = store.panelRoom;
+  if (!room) return;
+  const ok = await openDialog({
+    title: 'Удалить канал #' + channelTitleOf(room) + '?',
+    text: 'Канал исчезнет у всех участников вместе с сообщениями. Друзья и настройки не пострадают.',
+    ok: 'Удалить',
+    danger: true,
+  });
+  if (ok) { send({ t: 'channel_delete', room }); closeChannelPanel(); }
+};
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '😮', '😢'];
 
@@ -1767,7 +2028,7 @@ function mediaNode(m) {
   if (m.media.kind === 'file') {
     const card = document.createElement('a');
     card.className = 'file-card';
-    card.href = netUrl(m.media.url);
+    card.href = mediaUrl(m.media);
     card.target = '_blank';
     card.rel = 'noopener';
     card.download = m.media.name || 'файл';
@@ -1783,10 +2044,10 @@ function mediaNode(m) {
   box.className = 'media-box';
   const img = document.createElement('img');
   img.className = 'att-img';
-  img.src = netUrl(m.media.url);
+  img.src = mediaUrl(m.media);
   img.alt = 'картинка';
   img.loading = 'lazy';
-  img.onclick = (event) => { event.stopPropagation(); openLightbox(m.media.url); };
+  img.onclick = (event) => { event.stopPropagation(); openLightbox(mediaUrl(m.media)); };
   box.appendChild(img);
   return box;
 }
@@ -2032,7 +2293,7 @@ function openRoomByKey(room) {
     const peer = dmPeerOf(room);
     openRoom(room, 'dm', '@ ' + displayNameOf(peer), peer);
   } else {
-    openRoom(room, 'channel', '# ' + room);
+    openRoom(room, 'channel', '# ' + channelTitleOf(room));
   }
 }
 
@@ -2041,7 +2302,8 @@ function openLightbox(url) {
   const back = $('lightbox');
   const img = $('lightboxImg');
   if (!back || !img || !url) return;
-  img.src = netUrl(url);
+  // Сюда передаётся уже готовый адрес: у вложений в нём есть токен доступа.
+  img.src = url;
   back.classList.remove('hidden');
 }
 function hideLightbox() {
@@ -2248,7 +2510,8 @@ $('navFriends').onclick = () => {
   renderPeople();
 };
 $('navChannels').onclick = () => {
-  openRoom(store.room || 'obshiy', store.roomKind, store.roomTitle, store.roomPeer);
+  if (!store.room) { showNoChannels(); }
+  else openRoom(store.room, store.roomKind, store.roomTitle, store.roomPeer);
   $('side').classList.add('open');
   setTimeout(() => $('side').classList.remove('open'), 1800);
 };
@@ -2263,16 +2526,16 @@ $('navInvite').onclick = async () => {
 };
 $('newChannel').onclick = async () => {
   const name = await openDialog({
-    title: 'Новый чат',
-    text: 'Название латиницей, 2–24 символа: буквы, цифры, дефис, подчёркивание. Чат увидят все.',
+    title: 'Новый приватный канал',
+    text: 'Канал увидите только вы и те, кого вы позовёте. Друзей можно добавить сразу после создания.',
     input: true,
-    placeholder: 'games',
+    placeholder: 'например, Друзья',
     ok: 'Создать',
   });
   if (!name) return;
-  const clean = String(name).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
-  if (clean.length < 2) { toast('Название: латиница или цифры, от 2 символов'); return; }
-  send({ t: 'create', room: clean });
+  const title = String(name).trim().slice(0, 60);
+  if (!title) { toast('Введите название канала'); return; }
+  send({ t: 'create', room: title, title });
 };
 $('composer').onsubmit = (e) => {
   e.preventDefault();
@@ -2365,7 +2628,7 @@ function renderSearchResults() {
 }
 function roomLabelOf(room) {
   if (String(room).indexOf('dm:') === 0) return '@ ' + displayNameOf(dmPeerOf(room));
-  return '# ' + room;
+  return '# ' + channelTitleOf(room);
 }
 function appendHighlighted(parent, text, q) {
   const source = String(text || '');
@@ -3470,7 +3733,7 @@ function tabBridges(body) {
   field('homeserver', 'Home-сервер', 'Адрес вашего сервера Matrix', mx.homeserver, 'text', 'https://matrix.org');
   field('token', 'Access token', mx.hasToken ? 'Токен сохранён (' + mx.token + ') — оставьте поле пустым, чтобы не менять' : 'Element → Настройки → Помощь и о программе → Access token', '', 'password', 'syt_…');
   field('roomId', 'Комната', 'Идентификатор комнаты или её адрес', mx.roomId, 'text', '!abcdef:matrix.org');
-  field('channel', 'Канал Arc', 'Сюда попадут сообщения из Matrix', mx.channel || 'obshiy');
+  field('channel', 'Канал Arc', 'Сюда попадут сообщения из Matrix (адрес канала, например «games»)', mx.channel || '');
   field('prefix', 'Приписка', 'Необязательно: «[MX] », чтобы отличать сообщения из Matrix', mx.prefix, 'text', '[MX] ');
 
   const dirRow = mkRow('Направление', 'Что пересылать');
@@ -3660,8 +3923,8 @@ function tabAccount(body) {
   // Android-версия отдельным файлом: удобно, если PWA ставить не хочется.
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
-  apkLink.href = '/download/Arc-native-1.4.2.apk';
-  apkLink.setAttribute('download', 'Arc-1.4.2.apk');
+  apkLink.href = '/download/Arc.apk';
+  apkLink.setAttribute('download', 'Arc-1.5.0.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';

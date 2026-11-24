@@ -43,11 +43,19 @@ const mws = await open(member.data.token);
 await waitFor(mws, (m) => m.t === 'hello');
 const memberToken = member.data.token;
 
+// Приватный канал: создаёт владелец и сразу зовёт второго участника.
+ows.ws.send(JSON.stringify({ t: 'create', room: 'правки ' + stamp, title: 'правки ' + stamp }));
+const chCreated = await waitFor(ows, (m) => m.t === 'channel_created');
+const room = chCreated && chCreated.room;
+check('канал для правок создан', !!room, JSON.stringify(chCreated));
+ows.ws.send(JSON.stringify({ t: 'channel_add', room, name: memberName }));
+await waitFor(mws, (m) => m.t === 'channels' && (m.channels || []).includes(room));
+
 // 1. Своё сообщение можно исправить.
-ows.ws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: 'черновик ' + stamp }));
+ows.ws.send(JSON.stringify({ t: 'msg', room, text: 'черновик ' + stamp }));
 const mine = await waitFor(mws, (m) => m.t === 'msg' && m.text === 'черновик ' + stamp);
 check('сообщение отправлено', !!mine, '');
-ows.ws.send(JSON.stringify({ t: 'msg_edit', room: 'obshiy', id: mine.id, text: 'исправлено ' + stamp }));
+ows.ws.send(JSON.stringify({ t: 'msg_edit', room, id: mine.id, text: 'исправлено ' + stamp }));
 const edited = await waitFor(mws, (m) => m.t === 'msg_edit' && m.id === mine.id);
 check('правка доходит до собеседника', !!(edited && edited.text === 'исправлено ' + stamp), JSON.stringify(edited));
 check('у правки есть время', !!(edited && edited.edited > 0), String(edited && edited.edited));
@@ -56,34 +64,34 @@ check('у правки есть время', !!(edited && edited.edited > 0), St
 const mws2 = await open(memberToken);
 const hello = await waitFor(mws2, (m) => m.t === 'hello');
 check('повторный вход работает', !!hello, '');
-mws2.ws.send(JSON.stringify({ t: 'join', room: 'obshiy' }));
+mws2.ws.send(JSON.stringify({ t: 'join', room }));
 const hist = await waitFor(mws2, (m) => m.t === 'history');
 const inHistory = hist && (hist.messages || []).find((one) => one.id === mine.id);
 check('в истории исправленный текст', !!(inHistory && inHistory.text === 'исправлено ' + stamp), JSON.stringify(inHistory && inHistory.text));
 check('в истории есть пометка правки', !!(inHistory && inHistory.edited > 0), String(inHistory && inHistory.edited));
 
 // 3. Чужое сообщение исправить нельзя.
-mws.ws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: 'чужое ' + stamp }));
+mws.ws.send(JSON.stringify({ t: 'msg', room, text: 'чужое ' + stamp }));
 const theirs = await waitFor(ows, (m) => m.t === 'msg' && m.text === 'чужое ' + stamp);
 check('сообщение второго участника видно', !!theirs, '');
-ows.ws.send(JSON.stringify({ t: 'msg_edit', room: 'obshiy', id: theirs.id, text: 'подмена ' + stamp }));
+ows.ws.send(JSON.stringify({ t: 'msg_edit', room, id: theirs.id, text: 'подмена ' + stamp }));
 const deny = await waitFor(ows, (m) => m.t === 'error' && /только своё/.test(m.text || ''));
 check('чужое сообщение не исправляется', !!deny, JSON.stringify(ows.got.filter((m) => m.t === 'error').map((m) => m.text)));
 const stillTheirs = await waitFor(mws, (m) => m.t === 'msg_edit' && m.id === theirs.id, 500);
 check('подмены не случилось', !stillTheirs, '');
 
 // 4. Пустой текст не принимается.
-ows.ws.send(JSON.stringify({ t: 'msg_edit', room: 'obshiy', id: mine.id, text: '   ' }));
+ows.ws.send(JSON.stringify({ t: 'msg_edit', room, id: mine.id, text: '   ' }));
 const noChange = await waitFor(mws, (m) => m.t === 'msg_edit' && m.id === mine.id && m.text !== 'исправлено ' + stamp, 600);
 check('пустой текст не затирает сообщение', !noChange, '');
 
 // 5. Слишком длинный текст не принимается.
-ows.ws.send(JSON.stringify({ t: 'msg_edit', room: 'obshiy', id: mine.id, text: 'x'.repeat(5000) }));
+ows.ws.send(JSON.stringify({ t: 'msg_edit', room, id: mine.id, text: 'x'.repeat(5000) }));
 const tooLong = await waitFor(mws, (m) => m.t === 'msg_edit' && m.id === mine.id && String(m.text).length > 1000, 600);
 check('слишком длинный текст не принимается', !tooLong, '');
 
 // 6. Несуществующее сообщение — молча ничего.
-ows.ws.send(JSON.stringify({ t: 'msg_edit', room: 'obshiy', id: 999999, text: 'призрак' }));
+ows.ws.send(JSON.stringify({ t: 'msg_edit', room, id: 999999, text: 'призрак' }));
 await sleep(400);
 check('несуществующее сообщение не ломает сервер', true, '');
 

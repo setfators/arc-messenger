@@ -37,8 +37,7 @@ const ows = await open(token);
 await waitFor(ows, (m) => m.t === 'hello');
 
 // 1. Обычный текстовый файл.
-const text = new TextEncoder().encode('привет, это файл\nвторая строка\n');
-const up1 = await fetch(B + '/api/media', {
+const text = new TextEncoder().encode('привет, это файл\nвторая строка\n');const up1 = await fetch(B + '/api/media', {
   method: 'POST',
   headers: { 'x-token': token, 'content-type': 'text/plain', 'x-filename': encodeURIComponent('заметка.txt') },
   body: text,
@@ -50,7 +49,7 @@ check('тип отмечен как файл', !!(f1 && f1.kind === 'file'), JSO
 check('размер совпадает', !!(f1 && f1.size === text.length), String(f1 && f1.size) + ' vs ' + text.length);
 
 // 2. Скачивание: байты совпадают, есть имя в заголовке.
-const dl = await fetch(B + f1.url);
+const dl = await fetch(B + f1.url + '?t=' + encodeURIComponent(token));
 const back = new Uint8Array(await dl.arrayBuffer());
 check('файл скачивается', dl.status === 200 && back.length === text.length, String(dl.status));
 check('содержимое не изменилось', Buffer.from(back).equals(Buffer.from(text)), '');
@@ -68,7 +67,7 @@ const up2 = await fetch(B + '/api/media', {
 const f2 = await up2.json().catch(() => null);
 check('картинка по-прежнему принимается', up2.status === 200 && !!(f2 && f2.id), String(up2.status));
 check('картинка остаётся картинкой', !!(f2 && f2.kind === 'image'), JSON.stringify(f2 && f2.kind));
-const imgRes = await fetch(B + f2.url);
+const imgRes = await fetch(B + f2.url + '?t=' + encodeURIComponent(token));
 check('картинка отдаётся без attachment', !((imgRes.headers.get('content-disposition') || '').includes('attachment')), '');
 
 // 4. Файл в сообщении доходит до собеседника с метаданными.
@@ -78,11 +77,23 @@ const inv = await waitFor(ows, (m) => m.t === 'invite_created');
 const member = await api('/api/register', { name: memberName, password: 'parol123', invite: inv.invite.code });
 const mws = await open(member.data.token);
 await waitFor(mws, (m) => m.t === 'hello');
-ows.ws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: '', mediaId: f1.id }));
+// Приватный канал: файл должен уходить только его участникам.
+ows.ws.send(JSON.stringify({ t: 'create', room: 'файлы ' + stamp, title: 'файлы ' + stamp }));
+const chCreated = await waitFor(ows, (m) => m.t === 'channel_created');
+const room = chCreated && chCreated.room;
+check('канал для файлов создан', !!room, JSON.stringify(chCreated));
+ows.ws.send(JSON.stringify({ t: 'channel_add', room, name: memberName }));
+await waitFor(mws, (m) => m.t === 'channels' && (m.channels || []).includes(room));
+ows.ws.send(JSON.stringify({ t: 'msg', room, text: '', mediaId: f1.id }));
 const got = await waitFor(mws, (m) => m.t === 'msg' && m.media && m.media.id === f1.id);
 check('сообщение с файлом доходит', !!got, JSON.stringify(mws.got.filter((m) => m.t === 'msg').slice(-1)));
 check('у вложения есть имя и размер', !!(got && got.media.name === 'заметка.txt' && got.media.size === text.length), JSON.stringify(got && got.media));
 check('собеседник видит kind=file', !!(got && got.media.kind === 'file'), JSON.stringify(got && got.media.kind));
+// Файл после отправки в канал доступен его участникам, но не посторонним.
+const memberDl = await fetch(B + f1.url + '?t=' + encodeURIComponent(member.data.token));
+check('участник канала скачивает файл', memberDl.status === 200, String(memberDl.status));
+const anonDl = await fetch(B + f1.url);
+check('без токена файл не скачивается', anonDl.status === 403 || anonDl.status === 404, String(anonDl.status));
 
 // 5. Защита.
 const noToken = await fetch(B + '/api/media', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: text });

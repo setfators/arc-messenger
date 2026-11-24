@@ -146,7 +146,7 @@ const C = await new Client('C').open(regC.data.token);
 
 const helloA = await A.wait((m) => m.t === 'hello', 3000, 'hello');
 check('hello пришёл', !!helloA);
-check('hello знает имя и каналы', !!helloA && helloA.me.name === userA && helloA.channels.includes('obshiy'),
+check('hello знает имя и каналы', !!helloA && helloA.me.name === userA && Array.isArray(helloA.channels),
   helloA && JSON.stringify({ n: helloA.me.name, c: helloA.channels }));
 check('профиль в hello', !!(helloA && helloA.me.profile && helloA.me.profile.displayName), JSON.stringify(helloA && helloA.me.profile));
 check('настройки в hello', !!(helloA && helloA.me.settings && helloA.me.settings.notifyDesktop === true),
@@ -162,11 +162,24 @@ check('presence со статусами', !!presence0 && Array.isArray(presence0
 check('в presence есть статус каждого', !!(presence0 && presence0.statuses && presence0.statuses[userB.toLowerCase()] === 'online'),
   presence0 && JSON.stringify(presence0.statuses));
 
+// --- приватный канал: создаёт A, участников зовёт сам ------------------------
+A.send({ t: 'create', room: 'общий тест ' + stamp, title: 'общий тест ' + stamp });
+const chCreated = await A.waitFresh((m) => m.t === 'channel_created', 3000, 'channel_created');
+const room = chCreated && chCreated.room;
+check('приватный канал создан', !!room, JSON.stringify(chCreated));
+A.send({ t: 'channel_add', room, name: userB });
+A.send({ t: 'channel_add', room, name: userC });
+const [chanB, chanC] = await Promise.all([
+  B.waitFresh((m) => m.t === 'channels' && (m.channels || []).includes(room), 3000, 'канал у B'),
+  C.waitFresh((m) => m.t === 'channels' && (m.channels || []).includes(room), 3000, 'канал у C'),
+]);
+check('приглашённые видят канал', !!chanB && !!chanC, JSON.stringify({ b: !!chanB, c: !!chanC }));
+
 // --- сообщение в канал -------------------------------------------------------
-A.send({ t: 'join', room: 'obshiy' });
-const hist0 = await A.wait((m) => m.t === 'history' && m.room === 'obshiy', 2500, 'history');
+A.send({ t: 'join', room });
+const hist0 = await A.wait((m) => m.t === 'history' && m.room === room, 2500, 'history');
 check('история канала приходит', !!hist0 && Array.isArray(hist0.messages), JSON.stringify(hist0 && hist0.messages.length));
-A.send({ t: 'msg', room: 'obshiy', text: 'привет из теста ' + stamp });
+A.send({ t: 'msg', room, text: 'привет из теста ' + stamp });
 const gotB = await B.waitFresh((m) => m.t === 'msg' && m.text === 'привет из теста ' + stamp, 3000, 'msg');
 check('сообщение дошло до другого клиента', !!gotB, JSON.stringify(B.got.map((m) => m.t)));
 check('у сообщения есть id, автор и профиль', !!(gotB && gotB.id && gotB.author === userA && gotB.authorProfile),
@@ -220,11 +233,11 @@ const dmListB = await B.wait((m) => m.t === 'dm_list' && (m.items || []).some((i
 check('личный чат появился в списке', !!dmListB);
 
 // --- typing ------------------------------------------------------------------
-A.send({ t: 'typing', room: 'obshiy' });
+A.send({ t: 'typing', room });
 const typed = await B.waitFresh((m) => m.t === 'typing' && m.name === userA && !m.stopped, 2500, 'typing');
 check('typing доходит до других', !!typed);
 check('typing содержит displayName', !!(typed && typed.displayName), typed && typed.displayName);
-A.send({ t: 'typing', room: 'obshiy', stopped: true });
+A.send({ t: 'typing', room, stopped: true });
 const typedStop = await B.waitFresh((m) => m.t === 'typing' && m.stopped, 2500, 'typing stop');
 check('остановка typing доходит', !!typedStop);
 
@@ -243,45 +256,45 @@ C.send({ t: 'settings_update', settings: { status: 'online' } });
 await A.waitFresh((m) => m.t === 'presence' && m.online.includes(userC), 3000, 'presence снова');
 
 // --- удаление сообщения ------------------------------------------------------
-A.send({ t: 'msg', room: 'obshiy', text: 'удалить меня ' + stamp });
+A.send({ t: 'msg', room, text: 'удалить меня ' + stamp });
 const toDelete = await A.waitFresh((m) => m.t === 'msg' && m.text === 'удалить меня ' + stamp, 3000, 'своё сообщение');
 check('сообщение для удаления есть', !!toDelete);
 if (toDelete) {
-  B.send({ t: 'msg_delete', room: 'obshiy', id: toDelete.id });
+  B.send({ t: 'msg_delete', room, id: toDelete.id });
   const notMine = await B.waitFresh((m) => m.t === 'error' && m.text.includes('только свои'), 2500, 'запрет удаления чужого');
   check('чужое сообщение удалить нельзя', !!notMine, JSON.stringify(B.got.filter((m) => m.t === 'error').map((m) => m.text)));
-  A.send({ t: 'msg_delete', room: 'obshiy', id: toDelete.id });
+  A.send({ t: 'msg_delete', room, id: toDelete.id });
   const del = await B.waitFresh((m) => m.t === 'msg_delete' && m.id === toDelete.id, 3000, 'msg_delete');
   check('своё сообщение удаляется у всех', !!del);
 }
 
 // --- версия 1.4.0: реакции, ответы, картинки, поиск, push --------------------
-check('hello знает версию 1.4.x', !!(helloA && /^1\.4\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
+check('hello знает версию 1.5.x', !!(helloA && /^1\.5\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
 check('hello отдаёт VAPID-ключ', !!(helloA && typeof helloA.pushKey === 'string' && helloA.pushKey.length > 40),
   helloA && String(helloA.pushKey).slice(0, 20));
 
 // Ответ на сообщение.
-A.send({ t: 'msg', room: 'obshiy', text: 'оригинал ' + stamp });
+A.send({ t: 'msg', room, text: 'оригинал ' + stamp });
 const original = await B.waitFresh((m) => m.t === 'msg' && m.text === 'оригинал ' + stamp, 3000, 'оригинал');
 check('оригинал для ответа есть', !!original);
 if (original) {
-  B.send({ t: 'msg', room: 'obshiy', text: 'это ответ', replyTo: original.id });
+  B.send({ t: 'msg', room, text: 'это ответ', replyTo: original.id });
   const replyMsg = await A.waitFresh((m) => m.t === 'msg' && m.text === 'это ответ', 3000, 'сообщение с ответом');
   check('ответ приходит с цитатой', !!(replyMsg && replyMsg.reply && replyMsg.reply.id === original.id && replyMsg.reply.author === userA),
     JSON.stringify(replyMsg && replyMsg.reply));
-  B.send({ t: 'msg', room: 'obshiy', text: 'цитата из другой комнаты', replyTo: 999999 });
+  B.send({ t: 'msg', room, text: 'цитата из другой комнаты', replyTo: 999999 });
   const stale = await A.waitFresh((m) => m.t === 'msg' && m.text === 'цитата из другой комнаты', 3000, 'сообщение без цитаты');
   check('несуществующий оригинал не даёт цитаты', !!(stale && !stale.reply), JSON.stringify(stale && stale.reply));
 
   // Реакции.
-  B.send({ t: 'msg_react', room: 'obshiy', id: original.id, emoji: '🔥' });
+  B.send({ t: 'msg_react', room, id: original.id, emoji: '🔥' });
   const react = await A.waitFresh((m) => m.t === 'msg_reaction' && m.id === original.id, 3000, 'реакция');
   check('реакция доходит до других', !!(react && react.reactions && Array.isArray(react.reactions['🔥']) && react.reactions['🔥'].includes(userB)),
     JSON.stringify(react && react.reactions));
-  B.send({ t: 'msg_react', room: 'obshiy', id: original.id, emoji: '🔥' });
+  B.send({ t: 'msg_react', room, id: original.id, emoji: '🔥' });
   const unreact = await A.waitFresh((m) => m.t === 'msg_reaction' && m.id === original.id && !(m.reactions && m.reactions['🔥']), 3000, 'снятие реакции');
   check('повторный клик снимает реакцию', !!unreact, JSON.stringify(unreact && unreact.reactions));
-  B.send({ t: 'msg_react', room: 'obshiy', id: 999999, emoji: '🔥' });
+  B.send({ t: 'msg_react', room, id: 999999, emoji: '🔥' });
   await sleep(300);
   check('реакция на несуществующее сообщение молчит', !B.got.some((m) => m.t === 'error' && m.id === 999999));
 }
@@ -298,13 +311,16 @@ try { media = await mediaRes.json(); } catch (_) {}
 check('картинка загружается', mediaRes.status === 200 && !!media.id && media.url === '/media/' + media.id,
   mediaRes.status + ' ' + JSON.stringify(media));
 if (media) {
-  const got = await fetch(BASE + media.url);
+  // Файлы приватные: сервер отдаёт их только по ссылке с токеном.
+  const got = await fetch(BASE + media.url + '?t=' + encodeURIComponent(login.data.token));
   const bytes = Buffer.from(await got.arrayBuffer());
   check('картинка отдаётся теми же байтами', got.status === 200 && bytes.equals(png1x1),
     got.status + ' ' + bytes.length + '/' + png1x1.length);
   check('у картинки правильный тип', (got.headers.get('content-type') || '').includes('image/png'), got.headers.get('content-type'));
-  check('картинка кэшируется надолго', (got.headers.get('cache-control') || '').includes('immutable'), got.headers.get('cache-control'));
-  A.send({ t: 'msg', room: 'obshiy', text: '', mediaId: media.id });
+  check('картинка не кэшируется в общем кэше', (got.headers.get('cache-control') || '').includes('private'), got.headers.get('cache-control'));
+  const anonymous = await fetch(BASE + media.url);
+  check('без токена картинка недоступна', anonymous.status === 403 || anonymous.status === 404, String(anonymous.status));
+  A.send({ t: 'msg', room, text: '', mediaId: media.id });
   const withMedia = await B.waitFresh((m) => m.t === 'msg' && m.media && m.media.id === media.id, 3000, 'сообщение с картинкой');
   check('сообщение с картинкой доходит', !!withMedia, JSON.stringify(withMedia && withMedia.media));
 }
@@ -323,7 +339,7 @@ check('загрузка без токена запрещена', noToken.status 
 
 // Поиск по истории.
 const secretWord = 'иголка' + stamp;
-A.send({ t: 'msg', room: 'obshiy', text: 'тут ' + secretWord + ' в тексте' });
+A.send({ t: 'msg', room, text: 'тут ' + secretWord + ' в тексте' });
 await B.waitFresh((m) => m.t === 'msg' && m.text.includes(secretWord), 3000, 'сообщение для поиска');
 A.send({ t: 'search_messages', q: secretWord });
 const found = await A.waitFresh((m) => m.t === 'search_results' && m.q === secretWord, 3000, 'результаты поиска');

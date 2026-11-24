@@ -4,10 +4,13 @@
 
 import { mxDefault, mxNorm, mxPublic, mxSend, mxSync, mxWhoami } from './matrix.js';
 
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.5.0';
 const HISTORY_LIMIT = 300;
 const MAX_TEXT_CHARS = 4000;
-const DEFAULT_CHANNEL = 'obshiy';
+// Приватные каналы (1.5.0): канал виден только создателю и тем, кого он позвал.
+const CHANNEL_TITLE_MAX = 60;
+const CHANNEL_MEMBERS_MAX = 40;   // участников в одном канале
+const CHANNEL_OWN_MAX = 20;       // своих каналов у одного человека
 
 // Групповой звонок: столько человек одновременно в одном голосовом канале.
 const VOICE_LIMIT = 8;
@@ -271,7 +274,8 @@ function emptyStore() {
   return {
     users: {},
     rooms: {},
-    channels: [DEFAULT_CHANNEL],
+    channels: [],
+    channelMeta: {},
     tokens: {},
     tokenAt: {},
     authFails: {},
@@ -296,9 +300,9 @@ export class ChatHub {
       this.loading = (async () => {
         const saved = await this.state.storage.get('state');
         this.store = saved || emptyStore();
-        // Общий канал больше не навязывается: если владелец его удалил, он
-        // не должен воскресать. Чиним только то, что канал есть в списке,
-        // а комнаты для него нет (например, после ручного вмешательства).
+        // Приватные каналы (1.5.0): у каждого канала есть владелец и участники.
+        // Каналы больше не общие — их видит только создатель и приглашённые.
+        if (!this.store.channelMeta) this.store.channelMeta = {};
         for (const room of this.store.channels) {
           if (!Array.isArray(this.store.rooms[room])) this.store.rooms[room] = [];
         }
@@ -334,6 +338,49 @@ export class ChatHub {
           if (!Array.isArray(u.friends)) u.friends = [];
           if (!Array.isArray(u.incoming)) u.incoming = [];
           if (!Array.isArray(u.outgoing)) u.outgoing = [];
+        }
+        // Миграция каналов: тем, что остались с прежних версий, назначаем
+        // владельца и участников. Иначе канал оказался бы без хозяина и его
+        // никто не смог бы ни увидеть, ни удалить.
+        const users = this.store.users || {};
+        const allKeys = Object.keys(users);
+        for (const room of this.store.channels) {
+          const one = this.store.channelMeta[room];
+          if (!one) {
+            this.store.channelMeta[room] = {
+              owner: this.store.owner || '',
+              members: allKeys.slice(),
+              created: 0,
+              legacy: true,
+            };
+            continue;
+          }
+          const members = (Array.isArray(one.members) ? one.members : []).filter((k) => users[k]);
+          if (!one.owner || !users[one.owner]) one.owner = members[0] || this.store.owner || '';
+          if (one.owner && !members.includes(one.owner)) members.unshift(one.owner);
+          one.members = members;
+        }
+        // Метаданные удалённых каналов не храним: иначе база растёт вечно.
+        for (const room of Object.keys(this.store.channelMeta)) {
+          if (!this.store.channels.includes(room)) delete this.store.channelMeta[room];
+        }
+        // Вложения до 1.5.0 не знали своего канала: проставляем комнату по
+        // истории, чтобы старые картинки открывались у участников канала.
+        if (this.store.mediaCheck !== 2) {
+          let fixedMedia = 0;
+          for (const [room, list] of Object.entries(this.store.rooms || {})) {
+            if (!Array.isArray(list)) continue;
+            for (const m of list) {
+              if (!m || !m.media || !m.media.id) continue;
+              const item = (this.store.media || {})[m.media.id];
+              if (item && !item.room) {
+                item.room = room;
+                fixedMedia += 1;
+              }
+            }
+          }
+          this.store.mediaCheck = 2;
+          if (fixedMedia) await this.save();
         }
         // VAPID-ключи для Web Push: генерируются один раз и лежат в состоянии.
         if (!this.store.vapid || !this.store.vapid.pub || !this.store.vapid.priv) {
@@ -565,6 +612,7 @@ export class ChatHub {
       owner: this.store.owner || '',
       inviteOnly: !!this.store.inviteOnly,
       channels: this.store.channels,
+      channelMeta: this.store.channelMeta || {},
       users,
       rooms: this.store.rooms,
       invites: (this.store.invites || []).map((i) => this.inviteView(i)),
@@ -655,6 +703,22 @@ export class ChatHub {
       if (!users[owner]) { delete this.store.hidden[owner]; continue; }
       const rest = (list || []).filter((other) => users[other]);
       if (rest.length !== (list || []).length) this.store.hidden[owner] = rest;
+    }
+    // Каналы удалённых: вычёркиваем их из участников. Если пропал создатель,
+    // канал переходит первому участнику, а опустевший — удаляется, иначе он
+    // остался бы без хозяина и висел в базе навсегда.
+    for (const room of [...(this.store.channels || [])]) {
+      const meta = this.channelMeta(room);
+      if (!meta) continue;
+      const members = (Array.isArray(meta.members) ? meta.members : []).filter((k) => users[k]);
+      if (!users[meta.owner]) meta.owner = members[0] || '';
+      meta.members = members;
+      if (!meta.owner) {
+        this.store.channels = this.store.channels.filter((c) => c !== room);
+        delete this.store.rooms[room];
+        delete this.store.channelMeta[room];
+        removed += 1;
+      }
     }
     return removed;
   }
@@ -859,12 +923,22 @@ export class ChatHub {
     return jsonResponse(this.mediaView(this.store.media[id]));
   }
 
-  // GET /media/<id>: собираем куски и отдаём байты.
-  async serveMedia(url) {
+  // GET /media/<id>: собираем куски и отдаём байты. Файл приватного канала
+  // получает только тот, кто видит этот канал: ссылка без токена не работает.
+  async serveMedia(url, request) {
     const id = String(url.pathname.slice('/media/'.length) || '').replace(/[^a-z0-9]/gi, '');
     const meta = id && this.store.media ? this.store.media[id] : null;
     if (!meta) {
       return new Response('not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+    }
+    const token = String(url.searchParams.get('t') || (request && request.headers.get('x-token')) || '');
+    const who = token ? (this.store.tokens || {})[token] : '';
+    if (!who || !this.store.users[who]) {
+      return new Response('forbidden', { status: 403, headers: { 'cache-control': 'no-store' } });
+    }
+    // Вложение, ещё не отправленное в чат, видит только его автор.
+    if (meta.room ? !this.canSeeRoom(who, meta.room) : meta.by !== who) {
+      return new Response('forbidden', { status: 403, headers: { 'cache-control': 'no-store' } });
     }
     const parts = [];
     let size = 0;
@@ -890,7 +964,8 @@ export class ChatHub {
     const headers = {
       'content-type': meta.mime || 'application/octet-stream',
       'content-length': String(out.length),
-      'cache-control': 'public, max-age=31536000, immutable',
+      // Файл приватный: браузеру можно кэшировать, общим прокси — нет.
+      'cache-control': 'private, max-age=86400',
       'x-content-type-options': 'nosniff',
       'access-control-allow-origin': '*',
     };
@@ -1003,7 +1078,7 @@ export class ChatHub {
       const vapid = this.store.vapid;
       if (!vapid || !vapid.pub || !this.store.push) return;
       const dm = dmPartners(message.room);
-      const targets = dm ? [dm[0] === authorKey ? dm[1] : dm[0]] : Object.keys(this.store.push);
+      const targets = dm ? [dm[0] === authorKey ? dm[1] : dm[0]] : this.channelMembers(message.room);
       const tasks = [];
       for (const who of targets) {
         if (!who || who === authorKey) continue;
@@ -1094,6 +1169,128 @@ export class ChatHub {
     return items;
   }
 
+  // ------------------------------------------------- приватные каналы 1.5.0
+  // Канал — это отдельная комната со своим владельцем и списком участников.
+  // Общих каналов больше нет: пока человека не позвали, он канал не видит.
+  channelMeta(room) {
+    return (this.store.channelMeta || {})[room] || null;
+  }
+
+  channelTitle(room) {
+    const meta = this.channelMeta(room);
+    return (meta && meta.title) || room;
+  }
+
+  channelOwner(room) {
+    const meta = this.channelMeta(room);
+    return meta ? String(meta.owner || '') : '';
+  }
+
+  // Участники канала: только существующие аккаунты.
+  channelMembers(room) {
+    const meta = this.channelMeta(room);
+    if (!meta) return Object.keys(this.store.users || {});
+    return (Array.isArray(meta.members) ? meta.members : []).filter((k) => this.store.users[k]);
+  }
+
+  // Видит ли человек канал. У канала из старой версии метаданных нет — такой
+  // канал считаем открытым, чтобы переписка не пропала после обновления.
+  inChannel(key, room) {
+    if (!Array.isArray(this.store.channels) || !this.store.channels.includes(room)) return false;
+    const meta = this.channelMeta(room);
+    if (!meta) return true;
+    return (Array.isArray(meta.members) ? meta.members : []).includes(key);
+  }
+
+  ownsChannel(key, room) {
+    const meta = this.channelMeta(room);
+    return !!meta && meta.owner === key;
+  }
+
+  // Доступ к комнате целиком: приватный канал или своя личная переписка.
+  canSeeRoom(key, room) {
+    const pair = dmPartners(room);
+    if (pair) return pair[0] === key || pair[1] === key;
+    return this.inChannel(key, room);
+  }
+
+  // Представление канала для клиента: название, владелец, участники.
+  channelView(room, viewerKey) {
+    const meta = this.channelMeta(room);
+    const online = this.onlineNames().map((n) => n.toLowerCase());
+    const people = this.channelMembers(room).map((k) => {
+      const user = this.store.users[k];
+      const profile = this.profileView(user);
+      return {
+        name: user.name,
+        displayName: profile.displayName,
+        color: user.color,
+        avatarUrl: profile.avatarUrl,
+        online: online.includes(user.name.toLowerCase()),
+        banned: !!user.banned,
+      };
+    });
+    people.sort((a, b) => Number(b.online) - Number(a.online) || String(a.displayName).localeCompare(String(b.displayName)));
+    const owner = meta && meta.owner ? this.store.users[meta.owner] : null;
+    return {
+      room,
+      title: this.channelTitle(room),
+      owner: owner ? owner.name : '',
+      ownerKey: meta ? String(meta.owner || '') : '',
+      mine: !!meta && meta.owner === viewerKey,
+      legacy: !!(meta && meta.legacy),
+      members: people,
+      count: people.length,
+      created: meta ? meta.created || 0 : 0,
+    };
+  }
+
+  visibleChannels(key) {
+    return (this.store.channels || []).filter((room) => this.inChannel(key, room));
+  }
+
+  channelPayload(key) {
+    const channels = this.visibleChannels(key);
+    return {
+      t: 'channels',
+      channels,
+      items: channels.map((room) => this.channelView(room, key)),
+    };
+  }
+
+  sendChannels(key) {
+    this.sendTo(key, this.channelPayload(key));
+  }
+
+  // Список каналов у каждого свой, поэтому рассылаем адресно, а не broadcast.
+  broadcastChannels() {
+    const keys = new Set();
+    for (const ws of this.allSockets()) {
+      const meta = ws.deserializeAttachment();
+      if (meta && meta.key) keys.add(meta.key);
+    }
+    for (const key of keys) {
+      if (this.store.users[key]) this.sendChannels(key);
+    }
+  }
+
+  // Всё, что происходит в канале, уходит только его участникам.
+  sendChannel(room, payload) {
+    for (const key of this.channelMembers(room)) this.sendTo(key, payload);
+  }
+
+  // Адрес комнаты глобальный, а названия у людей могут совпасть: подбираем
+  // свободный адрес, чтобы канал «работа» у двух человек не слился в один.
+  freeChannelRoom(slug) {
+    let room = slug;
+    let n = 2;
+    while (this.store.channels.includes(room) || this.store.rooms[room]) {
+      room = slug.slice(0, 20) + '-' + n;
+      n += 1;
+    }
+    return room;
+  }
+
   pushMessage(room, message) {
     if (!this.store.rooms[room]) this.store.rooms[room] = [];
     const list = this.store.rooms[room];
@@ -1120,20 +1317,20 @@ export class ChatHub {
     };
   }
 
-  // Голосовать можно в канале и в личке со своим собеседником.
+  // Голосовать можно в своём канале и в личке со своим собеседником.
   voiceJoinAllowed(key, room) {
-    if (this.store.channels.includes(room)) return true;
+    if (this.inChannel(key, room)) return true;
     const pair = dmPartners(room);
     return !!pair && (pair[0] === key || pair[1] === key);
   }
 
-  // Состояние звонка в канале видят все, в личке — только двое участников:
-  // иначе по рассылке можно было бы узнать, кто с кем говорит.
+  // Состояние звонка в канале видят только участники канала, в личке — только
+  // двое: иначе по рассылке можно было бы узнать, кто с кем говорит.
   broadcastVoice(room) {
     const state = this.voiceState(room);
     const pair = dmPartners(room);
     if (!pair) {
-      this.broadcast(state);
+      this.sendChannel(room, state);
       return;
     }
     for (const who of pair) this.sendTo(who, state);
@@ -1170,7 +1367,7 @@ export class ChatHub {
       return this.handleMediaUpload(request);
     }
     if (request.method === 'GET' && url.pathname.startsWith('/media/')) {
-      return this.serveMedia(url);
+      return this.serveMedia(url, request);
     }
 
     // Картинки аватаров и стикеров: отдаём прямо из хранилища объекта.
@@ -1422,7 +1619,9 @@ export class ChatHub {
         status: this.statusOf(user),
         settings: mergeSettings(user.settings, null),
       },
-      channels: this.store.channels,
+      // Список каналов у каждого свой: только свои и те, куда позвали.
+      channels: this.visibleChannels(key),
+      channelItems: this.visibleChannels(key).map((room) => this.channelView(room, key)),
       avatars: Object.keys(this.store.avatars || {}).map((k) => ({
         name: normalizeName(k),
         url: '/avatar/' + encodeURIComponent(k) + '?v=' + this.store.avatars[k].v,
@@ -1512,12 +1711,15 @@ export class ChatHub {
       } else {
         room = String(value.room || '');
       }
-      const isChannel = this.store.channels.includes(room);
+      const isChannel = this.inChannel(key, room);
       const pair = dmPartners(room);
       const isDm = pair ? pair[0] === key || pair[1] === key : false;
       if (!isChannel && !isDm) return;
       this.sendTo(key, { t: 'history', room, messages: this.store.rooms[room] || [] });
       this.sendTo(key, { t: 'dm_list', items: this.dmList(key) });
+      // Заодно присылаем актуальный состав: у участника он мог измениться,
+      // пока приложение было закрыто.
+      if (isChannel) this.sendChannels(key);
       return;
     }
 
@@ -1533,10 +1735,13 @@ export class ChatHub {
       if (mediaId && !mediaMeta) return;
       if (mediaMeta && mediaMeta.by !== key) return;
       if ((!body && !sticker && !mediaMeta) || [...body].length > MAX_TEXT_CHARS) return;
-      const isChannel = this.store.channels.includes(room);
+      const isChannel = this.inChannel(key, room);
       const pair = dmPartners(room);
       const isDm = pair ? pair[0] === key || pair[1] === key : false;
       if (!isChannel && !isDm) return;
+      // Вложение привязывается к каналу при первой отправке: по нему потом
+      // проверяется, кому можно отдавать файл.
+      if (mediaMeta && mediaMeta.room && mediaMeta.room !== room) return;
       // Антифлуд: иначе один человек за минуту забьёт всю историю канала.
       const rate = this.checkMessageRate(key);
       // Заблокированный не пишет вовсе, замьюченный — до конца срока.
@@ -1590,7 +1795,10 @@ export class ChatHub {
         authorProfile: this.profileView(user),
       };
       if (reply) message.reply = reply;
-      if (mediaMeta) message.media = this.mediaView(mediaMeta);
+      if (mediaMeta) {
+        mediaMeta.room = room;
+        message.media = this.mediaView(mediaMeta);
+      }
       this.pushMessage(room, message);
       await this.save();
       this.pushNotify(message, key);
@@ -1601,7 +1809,8 @@ export class ChatHub {
         this.sendTo(pair[0], { t: 'dm_list', items: this.dmList(pair[0]) });
         this.sendTo(pair[1], { t: 'dm_list', items: this.dmList(pair[1]) });
       } else {
-        this.broadcast(event);
+        // Канал приватный: сообщение уходит только участникам, не всем подряд.
+        this.sendChannel(room, event);
         this.matrixOut(room, message);
       }
       return;
@@ -1613,7 +1822,7 @@ export class ChatHub {
       const id = Number(value.id);
       const emoji = reactionEmoji(value.emoji);
       if (!emoji || !id) return;
-      const isChannel = this.store.channels.includes(room);
+      const isChannel = this.inChannel(key, room);
       const pair = dmPartners(room);
       const isDm = pair ? pair[0] === key || pair[1] === key : false;
       if (!isChannel && !isDm) return;
@@ -1643,7 +1852,7 @@ export class ChatHub {
         this.sendTo(pair[0], event);
         this.sendTo(pair[1], event);
       } else {
-        this.broadcast(event);
+        this.sendChannel(room, event);
       }
       return;
     }
@@ -1660,7 +1869,7 @@ export class ChatHub {
           if (pair) {
             // В чужую личку не заглядываем.
             if (pair[0] !== key && pair[1] !== key) continue;
-          } else if (!this.store.channels.includes(room)) {
+          } else if (!this.inChannel(key, room)) {
             continue;
           }
           if (wanted && room !== wanted) continue;
@@ -1760,7 +1969,7 @@ export class ChatHub {
 
     if (kind === 'typing') {
       const room = String(value.room || '');
-      const isChannel = this.store.channels.includes(room);
+      const isChannel = this.inChannel(key, room);
       const pair = dmPartners(room);
       const isDm = pair ? pair[0] === key || pair[1] === key : false;
       if (!isChannel && !isDm) return;
@@ -1771,12 +1980,12 @@ export class ChatHub {
         displayName: this.profileView(user).displayName,
         stopped: !!value.stopped,
       };
-      // В личке «печатает…» не должен улетать всем подряд.
+      // В личке и в приватном канале «печатает…» видят только свои.
       if (pair) {
         this.sendTo(pair[0], event);
         this.sendTo(pair[1], event);
       } else {
-        this.broadcast(event);
+        this.sendChannel(room, event);
       }
       return;
     }
@@ -1784,15 +1993,19 @@ export class ChatHub {
     if (kind === 'msg_delete') {
       const id = Number(value.id);
       const room = String(value.room || '');
+      if (!this.canSeeRoom(key, room)) return;
       const list = this.store.rooms[room];
       if (!list || !id) return;
       const idx = list.findIndex((m) => m.id === id);
       if (idx < 0) return;
-      if (String(list[idx].author).toLowerCase() !== name.toLowerCase() && !this.canModerate(key)) {
+      // Свои сообщения удаляет автор; в своём канале — его владелец; модератор
+      // может удалять только там, где он сам участник.
+      const isMine = String(list[idx].author).toLowerCase() === name.toLowerCase();
+      if (!isMine && !this.ownsChannel(key, room) && !this.canModerate(key)) {
         this.sendTo(key, { t: 'error', text: 'Удалять можно только свои сообщения' });
         return;
       }
-      const wasMine = String(list[idx].author).toLowerCase() === name.toLowerCase();
+      const wasMine = isMine;
       const authorName = String(list[idx].author || '');
       list.splice(idx, 1);
       await this.save();
@@ -1802,13 +2015,13 @@ export class ChatHub {
         this.sendTo(pair[0], event);
         this.sendTo(pair[1], event);
       } else {
-        this.broadcast(event);
+        this.sendChannel(room, event);
       }
-      // Владелец удалил чужое — автору сообщения говорим об этом прямо.
+      // Владелец канала удалил чужое — автору сообщения говорим об этом прямо.
       if (!wasMine && authorName) {
         const authorKey = normalizeName(authorName);
         if (authorKey !== key) {
-          this.sendTo(authorKey, { t: 'notice', text: 'Владелец удалил ваше сообщение' });
+          this.sendTo(authorKey, { t: 'notice', text: 'Владелец канала удалил ваше сообщение' });
         }
       }
       return;
@@ -1849,7 +2062,7 @@ export class ChatHub {
       this.sendTo(key, { t: 'notice', text: 'Состояние восстановлено из копии за ' + res.date });
       this.sendTo(key, await this.backupList());
       // У остальных участников могла измениться лента — просим перечитать.
-      this.broadcast({ t: 'channels', channels: this.store.channels });
+      this.broadcastChannels();
       return;
     }
 
@@ -1968,6 +2181,7 @@ export class ChatHub {
       const room = String(value.room || '');
       const id = Number(value.id);
       const text = String(value.text || '').trim();
+      if (!this.canSeeRoom(key, room)) return;
       const list = this.store.rooms[room] || [];
       const idx = list.findIndex((m) => m && m.id === id);
       if (idx < 0) return;
@@ -1984,7 +2198,14 @@ export class ChatHub {
       message.text = text;
       message.edited = now();
       await this.save();
-      this.broadcast({ t: 'msg_edit', room, id, text, edited: message.edited });
+      const event = { t: 'msg_edit', room, id, text, edited: message.edited };
+      const pair = dmPartners(room);
+      if (pair) {
+        this.sendTo(pair[0], event);
+        this.sendTo(pair[1], event);
+      } else {
+        this.sendChannel(room, event);
+      }
       return;
     }
 
@@ -2347,51 +2568,179 @@ export class ChatHub {
       return;
     }
 
+    // Канал удаляет только его создатель: канал его, и кроме него за него
+    // никто не отвечает. Участникам приходит уведомление и новый список.
     if (kind === 'channel_delete') {
       const room = String(value.room || '').trim();
-      // Каналы удаляет только владелец: иначе первый же участник снесёт общий чат.
-      if (!this.isOwner(key)) {
-        this.sendTo(key, { t: 'error', text: 'Удалять каналы может только владелец' });
+      if (!room || !this.store.channels.includes(room)) return;
+      if (!this.ownsChannel(key, room)) {
+        this.sendTo(key, { t: 'error', text: 'Удалить канал может только его создатель' });
         return;
       }
-      // Удалить можно любой канал, включая общий: он больше не воссоздаётся.
-      if (!room) return;
-      if (!this.store.channels.includes(room)) return;
-      this.store.channels = this.store.channels.filter((c) => c !== room);
-      delete this.store.rooms[room];
+      const title = this.channelTitle(room);
+      const was = this.channelMembers(room);
       if (this.voice.has(room)) {
         this.voice.delete(room);
-        this.broadcastVoice(room);
       }
+      this.store.channels = this.store.channels.filter((c) => c !== room);
+      delete this.store.rooms[room];
+      delete this.store.channelMeta[room];
       await this.save();
-      this.broadcast({ t: 'channels', channels: this.store.channels });
-      this.broadcast({ t: 'notice', text: 'Канал #' + room + ' удалён' });
+      this.broadcastChannels();
+      for (const who of was) {
+        this.sendTo(who, { t: 'channel_removed', room });
+        this.sendTo(who, { t: 'notice', text: 'Канал #' + title + ' удалён' });
+      }
       return;
     }
 
+    // Создание приватного канала: кроме создателя его не видит никто, пока
+    // создатель сам не позовёт людей.
     if (kind === 'create') {
-      const raw = String(value.room || '').trim().toLowerCase();
-      const room = [...raw].filter((c) => /[a-z0-9_-]/.test(c)).slice(0, 24).join('');
+      const raw = String(value.title || value.room || '').trim();
+      // Название может быть любым (хоть кириллицей): для адреса комнаты берём
+      // латиницу, а если её нет — выдаём короткий случайный адрес.
+      let slug = [...raw.toLowerCase()].filter((c) => /[a-z0-9_-]/.test(c)).slice(0, 24).join('');
+      if (slug.length < 2) slug = 'ch-' + randomHex(3);
+      const title = head(raw || slug, CHANNEL_TITLE_MAX);
       // Каналы создавать могут все, но не чаще, чем позволяет лимит.
       const rate = this.rateAllow(key, 'create', CREATE_HOURLY, 60 * 60 * 1000);
       if (!rate.ok) {
         this.sendTo(key, { t: 'error', text: 'Слишком много новых каналов. Подождите ' + rate.retry + ' с.' });
         return;
       }
-      if (room.length < 2) {
-        this.sendTo(key, { t: 'error', text: 'Название канала: латиница, 2–24 символа' });
+      if (!title) {
+        this.sendTo(key, { t: 'error', text: 'Введите название канала' });
         return;
       }
-      if (this.store.channels.includes(room)) {
-        this.sendTo(key, { t: 'error', text: 'Такой канал уже есть' });
+      const owned = this.store.channels.filter((room) => this.ownsChannel(key, room)).length;
+      if (owned >= CHANNEL_OWN_MAX) {
+        this.sendTo(key, { t: 'error', text: 'У вас уже ' + CHANNEL_OWN_MAX + ' своих каналов — больше нельзя' });
         return;
       }
+      const room = this.freeChannelRoom(slug);
       this.store.channels.push(room);
       this.store.rooms[room] = [];
+      this.store.channelMeta[room] = {
+        owner: key,
+        members: [key],
+        title,
+        created: now(),
+      };
       await this.save();
-      this.broadcast({ t: 'channels', channels: this.store.channels });
+      this.sendChannels(key);
       this.sendTo(key, { t: 'history', room, messages: [] });
       this.sendTo(key, { t: 'channel_created', room });
+      return;
+    }
+
+    // Создатель зовёт человека в канал. Приглашение сразу действует: это
+    // приватный канал, а не заявка в друзья.
+    if (kind === 'channel_add') {
+      const room = String(value.room || '').trim();
+      if (!this.ownsChannel(key, room)) {
+        this.sendTo(key, { t: 'error', text: 'Приглашать в канал может только его создатель' });
+        return;
+      }
+      const target = this.findUserKey(value.name);
+      if (!target || target === key) {
+        this.sendTo(key, { t: 'error', text: target === key ? 'Это вы' : 'Такого пользователя нет' });
+        return;
+      }
+      const other = this.store.users[target];
+      if (other.banned || (this.store.banned && this.store.banned[target])) {
+        this.sendTo(key, { t: 'error', text: 'Этот аккаунт заблокирован' });
+        return;
+      }
+      const meta = this.channelMeta(room);
+      const members = Array.isArray(meta.members) ? meta.members : [];
+      if (members.includes(target)) {
+        this.sendTo(key, { t: 'error', text: 'Этот человек уже в канале' });
+        return;
+      }
+      if (members.length >= CHANNEL_MEMBERS_MAX) {
+        this.sendTo(key, { t: 'error', text: 'В канале уже ' + CHANNEL_MEMBERS_MAX + ' участников' });
+        return;
+      }
+      meta.members = members.concat([target]);
+      await this.save();
+      const title = this.channelTitle(room);
+      this.sendChannels(key);
+      this.sendChannels(target);
+      this.sendTo(target, { t: 'channel_added', room, channel: this.channelView(room, target) });
+      this.sendTo(target, { t: 'notice', text: 'Вас добавили в канал #' + title });
+      this.sendTo(key, { t: 'notice', text: other.name + ' теперь в канале #' + title });
+      return;
+    }
+
+    // Создатель убирает участника. Если тот сидел в голосовом канале —
+    // выкидываем и оттуда, иначе он остался бы говорить в закрытом канале.
+    if (kind === 'channel_kick') {
+      const room = String(value.room || '').trim();
+      if (!this.ownsChannel(key, room)) {
+        this.sendTo(key, { t: 'error', text: 'Убирать участников может только создатель канала' });
+        return;
+      }
+      const target = this.findUserKey(value.name);
+      if (!target || target === key) return;
+      const meta = this.channelMeta(room);
+      const members = Array.isArray(meta.members) ? meta.members : [];
+      if (!members.includes(target)) return;
+      meta.members = members.filter((k) => k !== target);
+      const other = this.store.users[target];
+      if (this.voiceRoomOf(other.name) === room) {
+        this.voiceRemove(other.name);
+        this.broadcastVoice(room);
+      }
+      await this.save();
+      const title = this.channelTitle(room);
+      this.sendChannels(key);
+      this.sendChannels(target);
+      this.sendTo(target, { t: 'channel_removed', room });
+      this.sendTo(target, { t: 'notice', text: 'Вас убрали из канала #' + title });
+      return;
+    }
+
+    // Участник уходит сам. Создатель уйти не может — он может только удалить
+    // канал, иначе канал остался бы без хозяина.
+    if (kind === 'channel_leave') {
+      const room = String(value.room || '').trim();
+      if (!this.inChannel(key, room)) return;
+      if (this.ownsChannel(key, room)) {
+        this.sendTo(key, { t: 'error', text: 'Вы создатель канала — его можно удалить' });
+        return;
+      }
+      const meta = this.channelMeta(room);
+      meta.members = (Array.isArray(meta.members) ? meta.members : []).filter((k) => k !== key);
+      if (this.voiceRoomOf(name) === room) {
+        this.voiceRemove(name);
+        this.broadcastVoice(room);
+      }
+      await this.save();
+      this.sendChannels(key);
+      this.sendChannel(room, { t: 'notice', text: name + ' вышел из канала' });
+      this.sendTo(key, { t: 'channel_removed', room });
+      return;
+    }
+
+    // Переименование: адрес комнаты остаётся прежним, меняется только название
+    // на экране, поэтому история и ссылки не ломаются.
+    if (kind === 'channel_rename') {
+      const room = String(value.room || '').trim();
+      if (!this.ownsChannel(key, room)) {
+        this.sendTo(key, { t: 'error', text: 'Переименовать канал может только его создатель' });
+        return;
+      }
+      const title = head(String(value.title || '').trim(), CHANNEL_TITLE_MAX);
+      if (!title) {
+        this.sendTo(key, { t: 'error', text: 'Название не может быть пустым' });
+        return;
+      }
+      const meta = this.channelMeta(room);
+      meta.title = title;
+      await this.save();
+      this.broadcastChannels();
+      this.sendChannel(room, { t: 'notice', text: 'Канал переименован: #' + title });
       return;
     }
 
@@ -2607,7 +2956,8 @@ export class ChatHub {
     const cfg = this.store.matrix;
     if (!cfg || !cfg.enabled || cfg.direction === 'in') return;
     if (message.external) return; // пришло из Matrix — обратно не гоняем
-    if ((cfg.channel || DEFAULT_CHANNEL) !== room) return;
+    // Мост работает только с тем каналом, который выбрал владелец в настройках.
+    if (!cfg.channel || cfg.channel !== room) return;
     const text = String(message.text || '').trim();
     if (!text) return;
     mxSend(cfg, text, message.author).then(async (res) => {
@@ -2643,9 +2993,17 @@ export class ChatHub {
     cfg.status = 'ok';
     cfg.message = res.first ? 'Точка отсчёта запомнена, новые сообщения пойдут в канал' : 'Мост работает';
     cfg.updatedAt = Date.now();
-    const room = cfg.channel || DEFAULT_CHANNEL;
-    if (!this.store.channels.includes(room)) this.store.channels.push(room);
-    if (!this.store.rooms[room]) this.store.rooms[room] = [];
+    const room = String(cfg.channel || '');
+    // Каналы теперь приватные: мост не создаёт их сам, иначе канал появился бы
+    // у всех сразу. Владелец сначала создаёт канал, потом указывает его тут.
+    if (!room || !this.store.channels.includes(room)) {
+      cfg.status = 'error';
+      cfg.message = 'Канал для моста не найден: создайте канал и укажите его в настройках';
+      cfg.updatedAt = Date.now();
+      await this.save();
+      this.broadcast({ t: 'matrix_state', matrix: mxPublic(cfg) });
+      return { ok: false, error: cfg.message };
+    }
     let added = 0;
     for (const ev of res.events || []) {
       this.store.seq = (this.store.seq || 0) + 1;
@@ -2661,7 +3019,7 @@ export class ChatHub {
       this.pushMessage(room, message);
       cfg.got = (cfg.got || 0) + 1;
       added += 1;
-      this.broadcast({ t: 'msg', ...message });
+      this.sendChannel(room, { t: 'msg', ...message });
     }
     await this.save();
     this.broadcast({ t: 'matrix_state', matrix: mxPublic(cfg) });
@@ -2743,7 +3101,7 @@ export class ChatHub {
     await this.ensure();
     await this.save();
     this.broadcast(this.presencePayload());
-    this.broadcast({ t: 'channels', channels: this.store.channels });
+    this.broadcastChannels();
     return { ok: true, date };
   }
 

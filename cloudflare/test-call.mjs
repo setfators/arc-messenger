@@ -125,7 +125,7 @@ await waitFor(aws, (m) => m.t === 'call_accepted');
 aws.ws.send(JSON.stringify({ t: 'voice_join', room: roomAB }));
 bws.ws.send(JSON.stringify({ t: 'voice_join', room: roomAB }));
 await sleep(400);
-ows.ws.send(JSON.stringify({ t: 'join', room: 'obshiy' }));
+// Третий участник вообще не состоит в этой личке — состояние ему не уходит.
 const ownerSaw = await waitFor(ows, (m) => m.t === 'voice_state' && m.room === roomAB, 700);
 check('чужую личку третьему не видно', !ownerSaw, '');
 

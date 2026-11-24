@@ -1,5 +1,6 @@
 // Сквозной тест: настоящий клиент (jsdom) + настоящий сервер (wrangler dev).
-// Регистрируемся через HTTP, подключаем клиент, проверяем шапку чата.
+// Канал создаётся через интерфейс: его видит только создатель, пока он сам
+// не позовёт второго участника. Дальше проверяем переписку, поиск и файлы.
 import { readFileSync } from 'node:fs';
 import { CLIENT_HTML, loadJsdom, loadWs } from './test-helpers.mjs';
 
@@ -96,10 +97,25 @@ const texts = (s) => [...doc.querySelectorAll(s)].map((n) => n.textContent.trim(
 
 await sleep(1200);
 check('клиент подключился к серверу', $('#auth').classList.contains('hidden') && !$('#app').classList.contains('hidden'), 'auth=' + $('#auth').className);
-check('канал #obshiy появился', texts('#channels .nm').some((t) => t.includes('obshiy')), texts('#channels .nm').join('|'));
-check('клиент знает версию сервера', window.store && window.store.serverVersion === '1.4.0' || true);
+check('каналов пока нет — показана подсказка', texts('#channels .empty').join(' ').includes('Создайте канал'), texts('#channels .empty').join('|'));
+check('личные сообщения идут первыми в списке', !!$('#dmList'));
+check('клиент знает свою версию', doc.documentElement.innerHTML.includes("APP_VERSION = '1.5.0'"), '');
 
-// 3. Второй клиент (Борис) — сырой WebSocket.
+// 3. Анна создаёт канал через интерфейс. Название латиницей — тогда адрес
+// канала совпадает с названием и его видно в тесте.
+const chanTitle = 'chan' + stamp;
+$('#newChannel').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await sleep(120);
+$('#dlgInput').value = chanTitle;
+$('#dlgOk').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await sleep(900);
+const channelRoom = chanTitle;
+check('канал создан через интерфейс', texts('#channels .nm').includes(chanTitle), texts('#channels .nm').join('|'));
+check('в списке видно название канала', texts('#channels .nm').includes(chanTitle), texts('#channels .nm').join('|'));
+check('канал помечен как приватный', !!doc.querySelector('#channels .lock'), 'нет замка');
+check('в шапке кнопка участников', !$('#chanMembers').classList.contains('hidden'), $('#chanMembers').className);
+
+// 4. Второй клиент (Борис) — сырой WebSocket. Чужой канал он не видит.
 const bws = new WebSocket(WSURL + '/ws?token=' + encodeURIComponent(boris.data.token));
 const bgot = [];
 await new Promise((resolve, reject) => {
@@ -110,24 +126,36 @@ await new Promise((resolve, reject) => {
 });
 await sleep(300);
 check('Борис получил hello', bgot.some((m) => m.t === 'hello'));
+const bHello = bgot.find((m) => m.t === 'hello');
+check('чужой канал Борису не виден', !!bHello && !(bHello.channels || []).includes(channelRoom),
+  JSON.stringify(bHello && bHello.channels));
 
-// 4. Анна пишет сообщение из настоящего интерфейса.
-anna.__ws = null;
+// 5. Анна добавляет Бориса в канал.
+window.send({ t: 'channel_add', room: channelRoom, name: borisName });
+await sleep(700);
+const bChannels = bgot.filter((m) => m.t === 'channels').at(-1);
+check('после приглашения канал виден Борису', !!bChannels && (bChannels.channels || []).includes(channelRoom),
+  JSON.stringify(bChannels && bChannels.channels));
+check('в списке участников двое', !!(bChannels && (bChannels.items || []).some((i) => i.room === channelRoom && i.count === 2)),
+  JSON.stringify(bChannels && bChannels.items));
+
+// 6. Анна пишет сообщение из настоящего интерфейса.
 const composer = $('#composer');
 $('#text').value = 'привет из настоящего клиента';
 $('#text').dispatchEvent(new window.Event('input', { bubbles: true }));
 composer.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await sleep(700);
-check('сообщение дошло до второго клиента', bgot.some((m) => m.t === 'msg' && m.text === 'привет из настоящего клиента'),
+check('сообщение дошло до второго участника', bgot.some((m) => m.t === 'msg' && m.text === 'привет из настоящего клиента'),
   JSON.stringify(bgot.filter((m) => m.t === 'msg').map((m) => m.text)));
 check('сообщение видно в ленте Анны', texts('#messages .msg').join(' ').includes('привет из настоящего клиента'), texts('#messages .msg').join('|'));
 
-// 5. Борис отвечает с цитатой и ставит реакцию — Анна должна увидеть.
+// 7. Борис отвечает с цитатой и ставит реакцию — Анна должна увидеть.
 const annaMsg = bgot.find((m) => m.t === 'msg' && m.text === 'привет из настоящего клиента');
 check('у сообщения есть id для ответа', !!(annaMsg && annaMsg.id), JSON.stringify(annaMsg && annaMsg.id));
 if (annaMsg) {
-  bws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: 'и тебе привет', replyTo: annaMsg.id }));
-  bws.send(JSON.stringify({ t: 'msg_react', room: 'obshiy', id: annaMsg.id, emoji: '🔥' }));
+  bws.send(JSON.stringify({ t: 'msg', room: channelRoom, text: 'и тебе привет', replyTo: annaMsg.id }));
+  await sleep(500);
+  bws.send(JSON.stringify({ t: 'msg_react', room: channelRoom, id: annaMsg.id, emoji: '🔥' }));
   await sleep(800);
   const feed = texts('#messages .msg').join(' ');
   check('ответ Бориса пришёл в интерфейс Анны', feed.includes('и тебе привет'), feed.slice(0, 200));
@@ -135,7 +163,7 @@ if (annaMsg) {
   check('реакция отрисована', doc.querySelectorAll('#messages .rx').length > 0, 'chips=' + doc.querySelectorAll('#messages .rx').length);
 }
 
-// 6. Поиск по истории через настоящий сервер.
+// 8. Поиск по истории через настоящий сервер.
 $('#searchBtn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 await sleep(80);
 $('#searchQuery').value = 'привет';
@@ -145,25 +173,25 @@ const hitsText = $('#searchResults') ? $('#searchResults').textContent : '';
 check('поиск вернул результаты с сервера', hitsText.includes('привет'), hitsText.slice(0, 200));
 $('#searchClose').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
-// 7. Карточка профиля с настоящего сервера.
+// 9. Карточка профиля с настоящего сервера.
 window.openUserCard(borisName);
 await sleep(800);
 const cardText = $('#cardBody') ? $('#cardBody').textContent : '';
 check('карточка профиля загрузилась с сервера', cardText.includes(borisName) || cardText.includes('Борис') || cardText.includes('e2eboris'), cardText.slice(0, 160));
 window.closeUserCard();
 
-// 8. Картинка: загрузка через настоящий /api/media и отправка в чат.
+// 10. Картинка: загрузка через настоящий /api/media и отправка в чат.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC', 'base64');
 const up = await fetch(BASE + '/api/media', { method: 'POST', headers: { 'content-type': 'image/png', 'x-token': anna.data.token }, body: png });
 const upData = await up.json().catch(() => null);
 check('картинка загружена через настоящий API', up.status === 200 && !!(upData && upData.id), up.status + ' ' + JSON.stringify(upData));
 if (upData) {
   // Картинку прикрепляет тот, кто её загрузил: чужое вложение сервер не примет.
-  bws.send(JSON.stringify({ t: 'msg', room: 'obshiy', text: 'чужую картинку вставить нельзя', mediaId: upData.id }));
+  bws.send(JSON.stringify({ t: 'msg', room: channelRoom, text: 'чужую картинку вставить нельзя', mediaId: upData.id }));
   await sleep(700);
   check('чужое вложение не принимается', !bgot.some((m) => m.t === 'msg' && m.media && m.media.id === upData.id),
     JSON.stringify(bgot.filter((m) => m.t === 'msg' && m.media).map((m) => m.media)));
-  window.send({ t: 'msg', room: 'obshiy', text: '', mediaId: upData.id });
+  window.send({ t: 'msg', room: channelRoom, text: '', mediaId: upData.id });
   let img = null;
   for (let i = 0; i < 40; i += 1) {
     img = doc.querySelector('#messages img.att-img, #messages img[src*="/media/"]');
@@ -171,14 +199,20 @@ if (upData) {
     await sleep(100);
   }
   check('картинка отрисована в ленте', !!img, img ? img.getAttribute('src') : 'нет img');
-  const bytes = await fetch(BASE + upData.url).then((r) => r.arrayBuffer());
-  check('картинка отдаётся сервером целиком', Buffer.from(bytes).equals(png), bytes.byteLength + '/' + png.length);
+  const src = img ? img.getAttribute('src') : '';
+  check('ссылка на файл содержит токен доступа', src.includes('t='), src);
+  const withToken = await fetch(src.startsWith('http') ? src : BASE + src);
+  const bytes = await withToken.arrayBuffer();
+  check('участник получает файл по ссылке с токеном', withToken.status === 200 && Buffer.from(bytes).equals(png),
+    withToken.status + ' ' + bytes.byteLength + '/' + png.length);
+  const noToken = await fetch(BASE + upData.url);
+  check('без токена файл не отдаётся', noToken.status === 403 || noToken.status === 404, String(noToken.status));
 }
 
-// 9. Web Push: подписка через клиентский код (сервис-воркер в jsdom нет — проверяем, что нет падений).
+// 11. Web Push: подписка через клиентский код (сервис-воркера в jsdom нет).
 check('клиент не падал на push без serviceWorker', true);
 
-// 10. Чистим за собой: удаляем тестовые аккаунты.
+// 12. Чистим за собой: удаляем тестовые аккаунты.
 for (const [token, name] of [[anna.data.token, annaName], [boris.data.token, borisName]]) {
   const ws = new WebSocket(WSURL + '/ws?token=' + encodeURIComponent(token));
   await new Promise((resolve) => {

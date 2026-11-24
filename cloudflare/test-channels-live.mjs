@@ -9,7 +9,8 @@ const check = (name, cond, extra) => {
 
 const page = await (await fetch(B + '/', { headers: { 'cache-control': 'no-cache' } })).text();
 check('есть пустое состояние каналов', page.includes('function showNoChannels'));
-check('подсказка «Каналов нет»', page.includes('Каналов нет'));
+check('подсказка про личные чаты вместо «Каналов нет»', page.includes('Личные сообщения работают как обычно'));
+check('каналы приватные: замок и число участников', page.includes("'lock', '🔒'") && page.includes("'cnt'"));
 check('удаление общего канала не блокируется', !page.includes('Общий канал удалить нельзя'));
 check('звонки в личке на месте', page.includes('startDmCall') && page.includes('callBox'));
 check('правка сообщений на месте', page.includes('edited-mark'));
