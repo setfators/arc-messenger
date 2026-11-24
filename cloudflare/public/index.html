@@ -440,6 +440,20 @@
 
   /* картинка в ленте и лайтбокс */
   .media-box { margin: 3px 0 2px; }
+  /* Карточка файла: имя, размер, значок и скачивание. */
+  .file-card {
+    display: flex; align-items: center; gap: 10px; margin: 4px 0 2px;
+    padding: 9px 11px; max-width: 320px; border-radius: 10px;
+    background: var(--panel-2, rgba(127, 127, 127, .12));
+    border: 1px solid var(--line, rgba(127, 127, 127, .25));
+    text-decoration: none; color: inherit;
+  }
+  .file-card:hover { background: rgba(127, 127, 127, .2); }
+  .file-icon { font-size: 22px; line-height: 1; flex: 0 0 auto; }
+  .file-meta { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+  .file-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-size { font-size: 12px; opacity: .68; margin-top: 1px; }
+  .file-dl { font-size: 17px; opacity: .65; flex: 0 0 auto; }
   .att-img {
     max-width: min(360px, 100%); max-height: 320px; border-radius: 10px; display: block;
     cursor: zoom-in; background: var(--panel2); object-fit: contain;
@@ -613,14 +627,14 @@
       <button type="button" class="rb-x" id="replyBarClose" title="Отменить ответ">✕</button>
     </div>
     <div class="reply-bar hidden" id="mediaBar">
-      <span class="rb-text">отправляю картинку…</span>
+      <span class="rb-text">отправляю файл…</span>
     </div>
     <form class="composer" id="composer">
       <button type="button" class="cbtn" id="attachBtn" title="Отправить картинку">📎</button>
       <button type="button" class="cbtn" id="emojiBtn" title="Эмодзи и стикеры">🙂</button>
       <input id="text" placeholder="Сообщение…" autocomplete="off" maxlength="4000">
       <button class="primary" id="send" type="submit">→</button>
-      <input type="file" id="mediaFile" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
+      <input type="file" id="mediaFile" class="hidden">
     </form>
   </main>
 </div>
@@ -1623,6 +1637,22 @@ function openReactionPicker(row, m) {
 }
 function mediaNode(m) {
   if (!m.media || !m.media.url) return null;
+  // Файлы показываем карточкой с именем и размером, картинки — как раньше.
+  if (m.media.kind === 'file') {
+    const card = document.createElement('a');
+    card.className = 'file-card';
+    card.href = netUrl(m.media.url);
+    card.target = '_blank';
+    card.rel = 'noopener';
+    card.download = m.media.name || 'файл';
+    card.onclick = (event) => event.stopPropagation();
+    const icon = el('span', 'file-icon', fileGlyph(m.media.name, m.media.mime));
+    const meta = el('span', 'file-meta');
+    meta.appendChild(el('span', 'file-name', m.media.name || 'файл'));
+    meta.appendChild(el('span', 'file-size', humanSize(m.media.size)));
+    card.append(icon, meta, el('span', 'file-dl', '↓'));
+    return card;
+  }
   const box = document.createElement('div');
   box.className = 'media-box';
   const img = document.createElement('img');
@@ -1633,6 +1663,30 @@ function mediaNode(m) {
   img.onclick = (event) => { event.stopPropagation(); openLightbox(m.media.url); };
   box.appendChild(img);
   return box;
+}
+
+// Значок по расширению: без картинок, просто символ.
+function fileGlyph(name, mime) {
+  const ext = String(name || '').toLowerCase().split('.').pop();
+  if (/^(zip|rar|7z|tar|gz)$/.test(ext)) return '🗜';
+  if (/^(pdf)$/.test(ext)) return '📕';
+  if (/^(doc|docx|rtf|odt)$/.test(ext)) return '📄';
+  if (/^(xls|xlsx|csv|ods)$/.test(ext)) return '📊';
+  if (/^(ppt|pptx|odp)$/.test(ext)) return '📽';
+  if (/^(mp3|wav|ogg|flac|m4a)$/.test(ext)) return '🎵';
+  if (/^(mp4|mov|mkv|avi|webm)$/.test(ext)) return '🎬';
+  if (/^(txt|md|log)$/.test(ext)) return '📝';
+  if (/^(apk)$/.test(ext)) return '📦';
+  if (String(mime || '').startsWith('audio/')) return '🎵';
+  if (String(mime || '').startsWith('video/')) return '🎬';
+  return '📎';
+}
+
+function humanSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return size + ' Б';
+  if (size < 1048576) return (size / 1024).toFixed(1) + ' КБ';
+  return (size / 1048576).toFixed(1) + ' МБ';
 }
 function messageToolsNode(m, row) {
   const tools = document.createElement('div');
@@ -4276,6 +4330,7 @@ function removeAvatar() {
 
 /* --------------------------------------------------- отправка картинки в чат (1.4.0) */
 const MAX_MEDIA_BYTES = 2500000;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_MEDIA_SIDE = 1600;
 
 function canvasToBlob(canvas, type, quality) {
@@ -4353,27 +4408,38 @@ async function uploadMedia(file) {
   const room = store.room;
   const caption = $('text') ? String($('text').value || '').trim() : '';
   const reply = store.replyTo;
+  const isImage = IMAGE_TYPES.includes(String(file.type || '').toLowerCase());
+  if (!isImage && file.size > MAX_FILE_BYTES) {
+    toast('Файл больше 10 МБ — отправьте поменьше');
+    return;
+  }
   store.uploading = (store.uploading || 0) + 1;
   renderUploadBar();
   try {
-    const prepared = await prepareMedia(file);
-    if (!prepared || !prepared.blob) throw new Error('картинка не подготовилась');
-    if (prepared.blob.size > MAX_MEDIA_BYTES) throw new Error('после сжатия больше 2,5 МБ — отправьте поменьше');
-    const res = await fetch(netUrl('/api/media'), {
-      method: 'POST',
-      headers: { 'x-token': store.token, 'content-type': prepared.mime },
-      body: prepared.blob,
-    });
+    let body = file;
+    let mime = String(file.type || '') || 'application/octet-stream';
+    if (isImage) {
+      const prepared = await prepareMedia(file);
+      if (!prepared || !prepared.blob) throw new Error('картинка не подготовилась');
+      if (prepared.blob.size > MAX_MEDIA_BYTES) throw new Error('после сжатия больше 2,5 МБ — отправьте поменьше');
+      body = prepared.blob;
+      mime = prepared.mime;
+    }
+    const headers = { 'x-token': store.token, 'content-type': mime };
+    // Имя файла передаём отдельным заголовком: заголовки должны быть ASCII,
+    // поэтому кодируем.
+    if (!isImage) headers['x-filename'] = encodeURIComponent(file.name || 'файл');
+    const res = await fetch(netUrl('/api/media'), { method: 'POST', headers, body });
     let data = null;
     try { data = await res.json(); } catch (error) { data = null; }
-    if (!res.ok || !data || !data.id) throw new Error((data && data.error) || 'сервер не принял картинку');
+    if (!res.ok || !data || !data.id) throw new Error((data && data.error) || 'сервер не принял файл');
     const payload = { t: 'msg', room, text: caption, mediaId: data.id };
     if (reply && reply.id != null) payload.replyTo = reply.id;
     send(payload);
     if ($('text')) $('text').value = '';
     clearReply();
   } catch (error) {
-    toast('Картинка: ' + (error && error.message ? error.message : 'не получилось'));
+    toast((isImage ? 'Картинка: ' : 'Файл: ') + (error && error.message ? error.message : 'не получилось'));
   } finally {
     store.uploading = Math.max(0, (store.uploading || 0) - 1);
     renderUploadBar();
@@ -4398,9 +4464,10 @@ if (composerBox) {
     event.preventDefault();
     composerBox.classList.remove('drag');
     const files = event.dataTransfer ? [...event.dataTransfer.files] : [];
+    if (!files.length) return;
+    // Картинку отправляем как картинку, всё остальное — как файл.
     const image = files.find((one) => IMAGE_TYPES.includes(String(one.type || '').toLowerCase()));
-    if (image) uploadMedia(image);
-    else if (files.length) toast('Нужна картинка: PNG, JPG, WEBP или GIF');
+    uploadMedia(image || files[0]);
   });
 }
 // Ctrl+V со скриншотом в буфере обмена.

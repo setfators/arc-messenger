@@ -128,7 +128,11 @@ function corsHeaders(request) {
   if (!ALLOWED_ORIGINS.has(origin)) return headers;
   headers.set('access-control-allow-origin', origin);
   headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
-  headers.set('access-control-allow-headers', 'content-type, x-token');
+  // x-filename нужен при отправке файлов: без него preflight отсекает запрос
+  // в мобильном приложении, где origin не совпадает с адресом сервера.
+  headers.set('access-control-allow-headers', 'content-type, x-token, x-filename');
+  // Имя, под которым сервер отдаёт скачанный файл.
+  headers.set('access-control-expose-headers', 'content-disposition');
   headers.set('access-control-max-age', '86400');
   headers.set('vary', 'origin');
   return headers;
@@ -188,6 +192,9 @@ export default {
       const headers = new Headers();
       headers.set('x-token', request.headers.get('x-token') || '');
       headers.set('content-type', request.headers.get('content-type') || '');
+      // Имя файла тоже передаём в объект: оно уже в процентном кодировании.
+      const filename = request.headers.get('x-filename');
+      if (filename) headers.set('x-filename', filename);
       const res = await stub.fetch('https://hub.internal/media-upload', {
         method: 'POST',
         headers,

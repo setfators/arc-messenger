@@ -20,9 +20,11 @@ const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
 // Вложения сообщений (1.4.0): сырые байты режутся на куски по 96 КБ и лежат
 // в storage Durable Object. Держим не больше 120 последних картинок.
-const MEDIA_MAX_BYTES = 2500000;
+const MEDIA_MAX_BYTES = 2500000;   // картинки: больше сжимаем на клиенте
+const FILE_MAX_BYTES = 10 * 1024 * 1024; // любые файлы, до 10 МБ
 const MEDIA_CHUNK = 96 * 1024;
-const MEDIA_LIMIT = 120;
+const MEDIA_LIMIT = 120;           // сколько вложений хранить
+const MEDIA_TOTAL_BYTES = 300 * 1024 * 1024; // и общий бюджет хранилища
 // В одном сообщении не больше 20 разных эмодзи.
 const REACTION_KINDS = 20;
 // Web Push: TTL уведомления и адрес отправителя для VAPID.
@@ -711,10 +713,18 @@ export class ChatHub {
   }
 
   // ------------------------------------------------------- вложения 1.4.0
-  // Метаданные для клиента: id, ссылка, тип и размер.
+  // Метаданные для клиента: id, ссылка, тип, размер и (для файлов) имя.
   mediaView(meta) {
     if (!meta) return null;
-    return { id: meta.id, url: '/media/' + meta.id, mime: meta.mime, size: meta.size };
+    const view = {
+      id: meta.id,
+      url: '/media/' + meta.id,
+      mime: meta.mime,
+      size: meta.size,
+      kind: meta.kind || 'image',
+    };
+    if (meta.name) view.name = meta.name;
+    return view;
   }
 
   // Удаляем вложение вместе со всеми кусками.
@@ -727,10 +737,22 @@ export class ChatHub {
     if (meta) delete this.store.media[id];
   }
 
-  // Оставляем только MEDIA_LIMIT последних вложений (по времени загрузки).
-  async trimMedia() {    const media = this.store.media || {};
+  // Оставляем последние вложения, укладываясь и в количество, и в объём:
+  // иначе десяток файлов по 10 МБ съест всё хранилище объекта.
+  async trimMedia() {
+    const media = this.store.media || {};
     const ids = Object.keys(media).sort((a, b) => (media[b].ts || 0) - (media[a].ts || 0));
-    for (const id of ids.slice(MEDIA_LIMIT)) await this.dropMedia(id);
+    let total = 0;
+    let kept = 0;
+    for (const id of ids) {
+      const size = Number(media[id].size) || 0;
+      if (kept >= MEDIA_LIMIT || (kept > 0 && total + size > MEDIA_TOTAL_BYTES)) {
+        await this.dropMedia(id);
+        continue;
+      }
+      total += size;
+      kept += 1;
+    }
   }
 
   // Читаем тело вложения с ограничением: лишнее вычитываем и выбрасываем,
@@ -764,24 +786,49 @@ export class ChatHub {
     return { bytes };
   }
 
-  // POST /media-upload: тело — сырые байты картинки, токен — в x-token.
+  // POST /media-upload: тело — сырые байты, токен — в x-token, имя — в x-filename.
   async handleMediaUpload(request) {
     // Тело читаем сразу и до конца: если ответить, не вычитав поток, соединение
     // обрывается (видно на wrangler dev), поэтому проверки идут после чтения.
-    const read = await this.readBodyLimited(request, MEDIA_MAX_BYTES);
+    const read = await this.readBodyLimited(request, FILE_MAX_BYTES);
     const token = String(request.headers.get('x-token') || '').trim();
     const owner = token ? this.store.tokens[token] : '';
     if (!owner || !this.store.users[owner]) {
       return jsonResponse({ error: 'Плохой токен или сеанс истёк' }, 401);
     }
-    const mime = String(request.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    if (!IMAGE_TYPES.includes(mime)) {
-      return jsonResponse({ error: 'Нужен PNG, JPG, WEBP или GIF' }, 400);
+    const mime = String(request.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+      || 'application/octet-stream';
+    const isImage = IMAGE_TYPES.includes(mime);
+
+    if (read.tooBig) {
+      return jsonResponse({ error: isImage ? 'Картинка больше 2,5 МБ' : 'Файл больше 10 МБ' }, 400);
     }
-    if (read.tooBig) return jsonResponse({ error: 'Картинка больше 2,5 МБ' }, 400);
     const bytes = read.bytes;
-    if (!bytes.length) return jsonResponse({ error: 'Пустая картинка' }, 400);
-    if (!imageSignatureOk(bytes, mime)) return jsonResponse({ error: 'Это не похоже на картинку' }, 400);
+    if (!bytes.length) return jsonResponse({ error: 'Пустой файл' }, 400);
+    if (isImage) {
+      if (bytes.length > MEDIA_MAX_BYTES) return jsonResponse({ error: 'Картинка больше 2,5 МБ' }, 400);
+      if (!imageSignatureOk(bytes, mime)) return jsonResponse({ error: 'Это не похоже на картинку' }, 400);
+    }
+
+    // Имя файла приходит в заголовке: чистим путь, управляющие символы и кавычки.
+    let name = '';
+    if (!isImage) {
+      try {
+        name = decodeURIComponent(String(request.headers.get('x-filename') || ''));
+      } catch (_) {
+        name = String(request.headers.get('x-filename') || '');
+      }
+      // Чистим путь, управляющие символы, кавычки и «..», чтобы имя нельзя было
+      // использовать для выхода из каталога или подмены расширения.
+      name = name
+        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
+        .replace(/\.{2,}/g, ' ')
+        .replace(/^[.\s]+|[.\s]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120);
+      if (!name) name = 'файл';
+    }
 
     const id = randomHex(8);
     const chunks = Math.ceil(bytes.length / MEDIA_CHUNK);
@@ -789,7 +836,16 @@ export class ChatHub {
       await this.state.storage.put('media:' + id + ':' + i, bytes.slice(i * MEDIA_CHUNK, (i + 1) * MEDIA_CHUNK));
     }
     if (!this.store.media) this.store.media = {};
-    this.store.media[id] = { id, mime, size: bytes.length, chunks, by: owner, ts: now() };
+    this.store.media[id] = {
+      id,
+      mime,
+      size: bytes.length,
+      chunks,
+      by: owner,
+      ts: now(),
+      kind: isImage ? 'image' : 'file',
+      name: name || undefined,
+    };
     await this.trimMedia();
     await this.save();
     return jsonResponse(this.mediaView(this.store.media[id]));
@@ -820,15 +876,23 @@ export class ChatHub {
       out.set(part, at);
       at += part.length;
     }
-    return new Response(out, {
-      headers: {
-        'content-type': meta.mime || 'application/octet-stream',
-        'content-length': String(out.length),
-        'cache-control': 'public, max-age=31536000, immutable',
-        'x-content-type-options': 'nosniff',
-        'access-control-allow-origin': '*',
-      },
-    });
+    // Файлы отдаём как скачивание с исходным именем; картинки — как раньше,
+    // чтобы работали предпросмотр и лайтбокс.
+    const isFile = (meta.kind || 'image') === 'file';
+    const headers = {
+      'content-type': meta.mime || 'application/octet-stream',
+      'content-length': String(out.length),
+      'cache-control': 'public, max-age=31536000, immutable',
+      'x-content-type-options': 'nosniff',
+      'access-control-allow-origin': '*',
+    };
+    if (isFile) {
+      const name = meta.name || 'file';
+      const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
+      headers['content-disposition'] =
+        'attachment; filename="' + ascii + '"; filename*=UTF-8\'\'' + encodeURIComponent(name);
+    }
+    return new Response(out, { headers });
   }
 
   // ------------------------------------------------------- Web Push 1.4.0
