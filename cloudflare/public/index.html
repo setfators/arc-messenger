@@ -27,6 +27,23 @@
     overflow: hidden;
   }
   button { font: inherit; color: inherit; cursor: pointer; }
+  /* Базовая кнопка: раньше кнопки без класса рисовались системными «белыми».
+     :where() обнуляет специфичность, поэтому .primary, .pill, .side-add и другие
+     классы продолжают перекрывать эти значения. */
+  button:where(:not(.switch, .x-btn, .rail-btn, .cbtn, .tb-btn, .del, .del-msg, .link, .chan, .chip, .call-btn, .primary, .pill, .side-add, .tab, .ok)) {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 12px;
+  }
+  button:where(:not(.switch, .x-btn, .rail-btn, .cbtn, .tb-btn, .del, .del-msg, .link, .chan, .chip, .call-btn, .primary, .pill, .side-add, .tab, .ok)):hover {
+    border-color: var(--muted);
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  select, input:where(:not([type=checkbox], [type=range], [type=file])) {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 10px; font: inherit;
+  }
+  select:focus, input:focus { outline: none; border-color: var(--accent); }
+  input[type=checkbox] { accent-color: var(--accent); }
   input { font: inherit; }
   .hidden { display: none !important; }
 
@@ -86,7 +103,7 @@
     padding: 16px 16px 10px; font-weight: 700; letter-spacing: .02em;
     border-bottom: 1px solid var(--line);
   }
-  .side-scroll { overflow-y: auto; padding: 10px 8px; flex: 1; }
+  .side-scroll { overflow-y: auto; overscroll-behavior: contain; padding: 10px 8px; flex: 1; }
   .side-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
     padding: 10px 8px 6px;
@@ -133,7 +150,7 @@
   }
   .topbar .tt { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topbar .pill { margin-left: auto; }
-  .messages { flex: 1; overflow-y: auto; padding: 18px 18px 8px; }
+  .messages { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 18px 18px 8px; }
   .msg { display: flex; gap: 10px; padding: 5px 0; }
   .ava {
     width: 36px; height: 36px; border-radius: 50%; flex: 0 0 36px; display: grid;
@@ -321,6 +338,20 @@
   .dlg-row button:hover { border-color: var(--muted); }
   .dlg-row .ok { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   .dlg-row .ok.danger { background: var(--danger); border-color: var(--danger); }
+
+  /* ---------- 1.8.0: показ экрана, клавиши, режим «нажми и говори» ---------- */
+  .check-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; font-size: 13px; color: var(--muted); }
+  .hk-list { display: flex; flex-direction: column; gap: 4px; }
+  .hk-row { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 3px 0; flex-wrap: wrap; }
+  .hk-row .hk-keys { min-width: 150px; display: flex; gap: 4px; flex-wrap: wrap; }
+  .hk-row .hk-do { color: var(--muted); }
+  .kbd {
+    border: 1px solid var(--line); border-bottom-width: 2px; background: var(--panel2);
+    border-radius: 6px; padding: 2px 7px; font-size: 11px; font-family: inherit;
+  }
+  .ptt-hint { margin: 6px 0 0; font-size: 11px; color: var(--muted); }
+  .call-hang { margin-left: auto; }
+  .listen { border-color: var(--accent) !important; color: var(--accent) !important; }
 
   /* ---------- модальное окно ---------- */
   .modal-back {
@@ -694,6 +725,7 @@
     <div class="voice-box hidden" id="voiceBox">
       <div class="voice-head" id="voiceHead">Голосовой канал</div>
       <div id="voiceUsers"></div>
+      <div class="ptt-hint hidden" id="pttHint"></div>
       <div class="voice-actions">
         <button class="pill" id="screenBtn" title="Показать свой экран всем в канале">Экран</button>
         <button class="pill" id="callOpen" title="Развернуть звонок">Звонок</button>
@@ -815,6 +847,7 @@
   <div class="call-head">
     <div class="call-title" id="callTitle">Звонок</div>
     <div class="call-people" id="callCount"></div>
+    <button class="pill danger call-hang" id="callHangup" type="button">Завершить</button>
     <button class="cbtn" id="callClose" title="Свернуть">✕</button>
   </div>
   <div class="screen-stage hidden" id="screenStage">
@@ -822,6 +855,33 @@
     <div class="screen-cap" id="screenCap"></div>
   </div>
   <div class="call-grid" id="callGrid"></div>
+</div>
+<div class="modal-back hidden" id="screenModal">
+  <div class="dlg" role="dialog" aria-modal="true">
+    <h3>Показать экран</h3>
+    <p>Выберите плавность и разрешение. Это же можно поменять в настройках «Голос и видео».</p>
+    <div class="field">
+      <div class="lbl">Плавность<small>60 кадров — для видео, 15 — экономит трафик</small></div>
+      <select id="scrFps">
+        <option value="15">15 кадров</option>
+        <option value="30">30 кадров</option>
+        <option value="60">60 кадров</option>
+      </select>
+    </div>
+    <div class="field">
+      <div class="lbl">Разрешение<small>Авто — как у экрана, 720p — если сеть слабая</small></div>
+      <select id="scrQuality">
+        <option value="auto">Авто</option>
+        <option value="720">1280 × 720</option>
+        <option value="1080">1920 × 1080</option>
+      </select>
+    </div>
+    <label class="check-row"><input type="checkbox" id="scrRemember"> Больше не спрашивать</label>
+    <div class="dlg-row">
+      <button id="scrCancel" type="button">Отмена</button>
+      <button id="scrStart" class="ok" type="button">Начать показ</button>
+    </div>
+  </div>
 </div>
 <div class="modal-back hidden" id="dlgBack">
   <div class="dlg" role="dialog" aria-modal="true">
@@ -916,7 +976,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -1750,6 +1810,12 @@ function handle(data) {
         store.call = null;
         hideCallBox();
         toast('Звонок отклонён');
+      }
+      // Собеседник вышел из звонка: оставаться одному в голосе нельзя —
+      // иначе следующие звонки будут упираться в «вы уже в звонке».
+      if (data && data.room && store.voiceRoom === data.room && dmPartnersOf(data.room)) {
+        leaveVoice(true);
+        toast('Звонок завершён');
       }
       break;
     }
@@ -2992,13 +3058,16 @@ async function ensureMic() {
 
 async function joinVoice(room) {
   if (!window.RTCPeerConnection) { toast('Браузер не поддерживает голосовой чат'); return; }
+  // Сначала выходим из прошлой комнаты: leaveVoice останавливает микрофон,
+  // поэтому вызывать его после ensureMic нельзя — иначе в новом канале
+  // не окажется звука.
+  if (store.voiceRoom && store.voiceRoom !== room) leaveVoice(true);
   try {
     await ensureMic();
   } catch (error) {
     toast('Микрофон недоступен: ' + error.message);
     return;
   }
-  if (store.voiceRoom && store.voiceRoom !== room) leaveVoice(true);
   for (const name of [...store.peers.keys()]) closePeer(name);
   store.muted = false;
   store.voiceRoom = room;
@@ -3009,7 +3078,13 @@ async function joinVoice(room) {
   toast(dmPartnersOf(room) ? 'Звонок начался' : 'Вы в голосовом канале ' + room);
 }
 
-function leaveVoice(silent) {  if (!store.voiceRoom) return;
+function leaveVoice(silent) {
+  if (!store.voiceRoom) {
+    // Иногда интерфейс уже «вышел», а сервер ещё считает иначе: всё равно
+    // отправляем voice_leave, чтобы не застрять в голосе.
+    if (store.voiceUsers && store.voiceUsers.length) send({ t: 'voice_leave' });
+    return;
+  }
   // Показ экрана не должен жить после выхода из канала.
   if (store.screenOn || store.screenStream) stopScreen(true);
   send({ t: 'voice_leave' });
@@ -3017,11 +3092,15 @@ function leaveVoice(silent) {  if (!store.voiceRoom) return;
   store.voiceRoom = null;
   store.voiceUsers = [];
   store.screenSender = '';
+  store.call = null;
+  if (store.callTimer) { clearTimeout(store.callTimer); store.callTimer = null; }
+  stopMicGate();
   if (store.localStream) {
     store.localStream.getTracks().forEach((track) => track.stop());
     store.localStream = null;
   }
   hideCall();
+  hideCallBox();
   renderVoiceBox();
   renderChannels();
   if (!silent) toast('Вы вышли из голосового канала');
@@ -3034,7 +3113,19 @@ function renderVoiceBox() {
     return;
   }
   box.classList.remove('hidden');
-  $('voiceHead').textContent = 'Голос: ' + store.voiceRoom;
+  const dmPeer = dmPartnersOf(store.voiceRoom) ? callPeerName(store.voiceRoom) : '';
+  $('voiceHead').textContent = dmPeer
+    ? 'Звонок · ' + displayNameOf(dmPeer)
+    : 'Голос · ' + channelTitleOf(store.voiceRoom);
+  const hint = $('pttHint');
+  if (hint) {
+    hint.classList.toggle('hidden', !pttModeOn());
+    if (pttModeOn()) {
+      hint.textContent = pttHeld
+        ? '🎙 Микрофон открыт — говорите'
+        : 'Удерживайте ' + formatCombo(S().pttKey) + ' для речи';
+    }
+  }
   const list = $('voiceUsers');
   list.innerHTML = '';
   for (const user of store.voiceUsers) {
@@ -3141,7 +3232,7 @@ function createPeer(name) {
   if (store.screenOn && store.screenStream) {
     store.screenStream.getVideoTracks().forEach((track) => {
       const sender = pc.addTrack(track, store.screenStream);
-      tuneScreenSender(sender, store.screenFps || 30);
+      tuneScreenSender(sender, store.screenFps || 30, store.screenQuality || 'auto');
     });
   }
   pc.onicecandidate = (event) => {
@@ -3281,7 +3372,8 @@ const STATUS_LIST = [['online', 'В сети'], ['idle', 'Не активен'],
 const TONE_LIST = [['chime', 'Колокольчик'], ['pop', 'Хлопок'], ['blip', 'Сигнал']];
 const ACCENTS = ['#5865f2', '#3ba55d', '#faa61a', '#eb459e', '#ed4245', '#00a8fc', '#9b59b6'];
 let currentTab = 'profile';
-let micCtx = null, micGainNode = null, micDest = null;
+let micCtx = null, micGainNode = null, micDest = null, micAnalyser = null, micGateTimer = null;
+let pttHeld = false;
 let soundCtx = null;
 let saveTimer = null;
 let updateUnsub = null;
@@ -3294,6 +3386,11 @@ function settingsDefaults() {
     dmPrivacy: 'all', status: 'online',
     voiceInput: '', voiceOutput: '', voiceVolume: 100, micGain: 100,
     screenFps: 30,
+    screenQuality: 'auto',
+    screenAsk: true,
+    micSensitivity: 50,
+    voiceMode: 'activity',
+    pttKey: 'Alt+KeyV',
     noiseSuppress: true, echoCancel: true, autoGain: true,
     turnUrl: '', turnUser: '', turnPass: '',
   };
@@ -3311,24 +3408,81 @@ function applySink(audio) {
   if (!out || !audio || typeof audio.setSinkId !== 'function') return;
   try { audio.setSinkId(out).catch(() => {}); } catch (error) {}
 }
+function micGainValue() {
+  return Math.max(0, Math.min(200, Number(S().micGain) || 100)) / 100;
+}
+
+// «Нажми и говори»: микрофон открыт, только пока держат комбинацию.
+function pttModeOn() {
+  return S().voiceMode === 'ptt';
+}
+
+// Порог срабатывания: чувствительность 100 ловит шёпот, 0 — только громкую речь.
+function micThresholdDb() {
+  const sens = Math.max(0, Math.min(100, Number(S().micSensitivity) || 50));
+  return -15 - (sens / 100) * 40;
+}
+
+function stopMicGate() {
+  if (micGateTimer) { clearInterval(micGateTimer); micGateTimer = null; }
+  pttHeld = false;
+  if (micCtx) {
+    try { micCtx.close(); } catch (error) {}
+  }
+  micCtx = null;
+  micGainNode = null;
+  micDest = null;
+  micAnalyser = null;
+}
+
+// Общий тракт микрофона: усиление, шумовой порог и режим «нажми и говори».
+// Раньше при усилении 100 % звук шёл напрямую и настройка чувствительности
+// не работала вовсе.
 function micOutStream() {
   if (!store.localStream) return null;
-  const gain = Math.max(0, Math.min(200, Number(S().micGain) || 100)) / 100;
-  if (Math.abs(gain - 1) < 0.01) return store.localStream;
   try {
     if (!micCtx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return store.localStream;
       micCtx = new Ctx();
       const source = micCtx.createMediaStreamSource(store.localStream);
       micGainNode = micCtx.createGain();
       micDest = micCtx.createMediaStreamDestination();
+      micAnalyser = micCtx.createAnalyser();
+      micAnalyser.fftSize = 512;
+      source.connect(micAnalyser);
       source.connect(micGainNode).connect(micDest);
+      if (micGateTimer) clearInterval(micGateTimer);
+      micGateTimer = setInterval(micGateTick, 90);
     }
     if (micCtx.state === 'suspended') micCtx.resume();
-    micGainNode.gain.value = gain;
+    micGainNode.gain.value = micGainValue();
     return micDest.stream;
   } catch (error) {
     return store.localStream;
+  }
+}
+
+function micGateTick() {
+  if (!micCtx || !micGainNode || !micAnalyser) return;
+  const buf = new Uint8Array(micAnalyser.fftSize);
+  micAnalyser.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i += 1) {
+    const v = (buf[i] - 128) / 128;
+    sum += v * v;
+  }
+  const rms = Math.sqrt(sum / buf.length);
+  const db = 20 * Math.log10(Math.max(rms, 1e-5));
+  let open;
+  if (store.muted) open = false;
+  else if (pttModeOn()) open = pttHeld;
+  else open = db >= micThresholdDb();
+  const target = open ? micGainValue() : 0;
+  try {
+    micGainNode.gain.setTargetAtTime(target, micCtx.currentTime, 0.04);
+  } catch (error) {
+    micGainNode.gain.value = target;
   }
 }
 function applySettings(next) {
@@ -3343,7 +3497,8 @@ function applySettings(next) {
   if (s.showTyping === false) clearTypers();
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', theme === 'light' ? '#ffffff' : theme === 'midnight' ? '#06070b' : '#5865f2');
-  if (micGainNode) micGainNode.gain.value = Math.max(0, Math.min(2, (Number(s.micGain) || 100) / 100));
+  if (micGainNode) micGainNode.gain.value = micGainValue();
+  if (store.voiceRoom) renderVoiceBox();
   for (const peer of store.peers.values()) {
     if (!peer.audio) continue;
     peer.audio.volume = remoteVolume();
@@ -3896,8 +4051,63 @@ function tabVoice(body) {
     String(s.screenFps || 30),
     (v) => saveSettings({ screenFps: Number(v) })
   );
+  addSelect(
+    sectDemo,
+    'Разрешение',
+    'Авто — как у экрана, 720p — если сеть слабая',
+    [['auto', 'Авто'], ['720', '1280 × 720'], ['1080', '1920 × 1080']],
+    screenQualityValue(),
+    (v) => saveSettings({ screenQuality: v })
+  );
+  addSwitch(sectDemo, 'Спрашивать при включении', 'Показывать окно выбора плавности и разрешения перед каждой демонстрацией', s.screenAsk !== false, (v) => saveSettings({ screenAsk: v }));
   sectDemo.appendChild(el('p', 'install-note', 'Применится при следующем включении показа экрана. Для 60 кадров нужно стабильное соединение — около 4–6 Мбит/с на зрителя.'));
   body.appendChild(sectDemo);
+
+  // Микрофон: порог срабатывания и режим «нажми и говори».
+  const sectMic = el('div', 'sect');
+  sectMic.appendChild(el('h4', '', 'Микрофон'));
+  addRange(sectMic, 'Чувствительность', '100 — слышно шёпот, 0 — только громкая речь; ниже порога микрофон молчит', 0, 100, 5, s.micSensitivity === undefined ? 50 : s.micSensitivity, '%', (v) => saveSettings({ micSensitivity: v }));
+  addSelect(
+    sectMic,
+    'Режим',
+    'Обычный — микрофон открыт с порогом, «нажми и говори» — только пока держите клавишу',
+    [['activity', 'Обычный (порог)'], ['ptt', 'Нажми и говори']],
+    s.voiceMode === 'ptt' ? 'ptt' : 'activity',
+    (v) => { saveSettings({ voiceMode: v }); if (store.voiceRoom) renderVoiceBox(); }
+  );
+  const pttRow = mkRow('Клавиша «нажми и говори»', 'Удерживайте её в голосовом канале, чтобы говорить');
+  const pttBtn = el('button', '', formatCombo(s.pttKey || 'Alt+KeyV'));
+  pttBtn.type = 'button';
+  pttRow.appendChild(pttBtn);
+  sectMic.appendChild(pttRow);
+  let pttListening = false;
+  let pttListenHandler = null;
+  const stopPttListen = () => {
+    pttListening = false;
+    if (pttListenHandler) {
+      document.removeEventListener('keydown', pttListenHandler, true);
+      pttListenHandler = null;
+    }
+    pttBtn.classList.remove('listen');
+    pttBtn.textContent = formatCombo(S().pttKey || 'Alt+KeyV');
+  };
+  pttBtn.onclick = () => {
+    if (pttListening) { stopPttListen(); return; }
+    pttListening = true;
+    pttBtn.classList.add('listen');
+    pttBtn.textContent = 'Нажмите клавиши… (Esc — отмена)';
+    pttListenHandler = (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); stopPttListen(); return; }
+      if (MODIFIER_CODES.includes(event.code)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      saveSettings({ pttKey: hotkeyCombo(event) });
+      stopPttListen();
+    };
+    document.addEventListener('keydown', pttListenHandler, true);
+  };
+  sectMic.appendChild(el('p', 'install-note', 'Порог и режим применяются сразу. Комбинация работает, когда фокус не в поле ввода.'));
+  body.appendChild(sectMic);
 
   const sect3 = el('div', 'sect');
   sect3.appendChild(el('h4', '', 'Обработка звука'));
@@ -3932,9 +4142,22 @@ function tabVoice(body) {
     });
   };
   body.appendChild(sect4);
-}
 
-/* ------------------------------------------------- мосты: Matrix и свой сервер */
+  // Горячие клавиши: список фиксированный, чтобы не плодить конфликты.
+  const sectKeys = el('div', 'sect');
+  sectKeys.appendChild(el('h4', '', 'Клавиатура'));
+  const keyList = el('div', 'hk-list');
+  for (const item of HOTKEYS) {
+    const row = el('div', 'hk-row');
+    const keys = el('span', 'hk-keys');
+    for (const spec of item.keys) keys.appendChild(el('span', 'kbd', formatCombo(spec)));
+    row.append(keys, el('span', 'hk-do', item.label));
+    keyList.appendChild(row);
+  }
+  sectKeys.appendChild(keyList);
+  sectKeys.appendChild(el('p', 'install-note', 'Комбинации работают, когда фокус не в поле ввода. Esc закрывает окна и панели.'));
+  body.appendChild(sectKeys);
+}
 function mxNow() {
   return store.matrix || {};
 }
@@ -4169,7 +4392,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.7.0.apk');
+  apkLink.setAttribute('download', 'Arc-1.8.0.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';
@@ -5013,6 +5236,8 @@ if ($('replyBarClose')) $('replyBarClose').onclick = () => clearReply();
 // Esc закрывает верхний слой: подбор реакции, лайтбокс, карточку, удаление, поиск.
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (screenSettingsOpen()) { closeScreenDialog(); return; }
+  if (channelPanelOpen()) { closeChannelPanel(); return; }
   if (reactionPicker) { closeReactionPicker(); return; }
   const light = $('lightbox');
   if (light && !light.classList.contains('hidden')) { hideLightbox(); return; }
@@ -5673,12 +5898,14 @@ function screenFpsValue() {
 
 // Битрейт под выбранные кадры: 60 кадров требуют заметно больше полосы, чем
 // статичный текст на экране. Если сеть не тянет, браузер сам снизит качество.
-function tuneScreenSender(sender, fps) {
+function tuneScreenSender(sender, fps, quality) {
   try {
     if (!sender || !sender.getParameters || !sender.setParameters) return;
+    const base = fps >= 50 ? 6 : fps >= 30 ? 3 : 1.5;
+    const factor = quality === '720' ? 0.66 : 1;
     const params = sender.getParameters();
     if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-    params.encodings[0].maxBitrate = fps >= 50 ? 6000000 : fps >= 30 ? 2500000 : 1200000;
+    params.encodings[0].maxBitrate = Math.round(base * factor * 1000000);
     params.encodings[0].maxFramerate = fps;
     params.degradationPreference = fps >= 50 ? 'maintain-framerate' : 'balanced';
     const result = sender.setParameters(params);
@@ -5686,7 +5913,157 @@ function tuneScreenSender(sender, fps) {
   } catch (_) { /* браузер не дал настроить — останутся его значения */ }
 }
 
-async function startScreen() {  if (!store.voiceRoom) {
+/* ------------------------------------- настройки показа экрана 1.8.0 */
+function screenQualityValue() {
+  const q = String(S().screenQuality || 'auto');
+  return q === '720' || q === '1080' ? q : 'auto';
+}
+function screenQualitySize(q) {
+  if (q === '720') return [1280, 720];
+  if (q === '1080') return [1920, 1080];
+  return null;
+}
+function screenSettingsOpen() {
+  const back = $('screenModal');
+  return !!back && !back.classList.contains('hidden');
+}
+function closeScreenDialog() {
+  const back = $('screenModal');
+  if (back) back.classList.add('hidden');
+}
+function openScreenDialog() {
+  if (!store.voiceRoom) { toast('Сначала войдите в голосовой канал'); return; }
+  if (store.screenOn) { stopScreen(); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    toast('Этот браузер не умеет показывать экран');
+    return;
+  }
+  const back = $('screenModal');
+  if (S().screenAsk === false || !back) { startScreen(); return; }
+  $('scrFps').value = String(screenFpsValue());
+  $('scrQuality').value = screenQualityValue();
+  $('scrRemember').checked = false;
+  back.classList.remove('hidden');
+  setTimeout(() => { const ok = $('scrStart'); if (ok) ok.focus(); }, 40);
+}
+function screenDialogAccept() {
+  const fps = Number($('scrFps').value) || 30;
+  const quality = $('scrQuality').value;
+  const remember = !!$('scrRemember').checked;
+  closeScreenDialog();
+  saveSettings({ screenFps: fps, screenQuality: quality, screenAsk: !remember });
+  startScreen();
+}
+if ($('scrCancel')) $('scrCancel').onclick = () => closeScreenDialog();
+if ($('scrStart')) $('scrStart').onclick = () => screenDialogAccept();
+if ($('screenModal')) {
+  $('screenModal').onclick = (event) => {
+    if (event.target === $('screenModal')) closeScreenDialog();
+  };
+}
+
+/* ------------------------------------- клавиши и «нажми и говори» 1.8.0 */
+function comboParts(spec) {
+  return String(spec || '').split('+').map((part) => part.trim()).filter(Boolean);
+}
+const MODIFIER_CODES = ['ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight', 'MetaLeft', 'MetaRight'];
+function hotkeyCombo(event) {
+  const parts = [];
+  if (event.ctrlKey) parts.push('Ctrl');
+  if (event.altKey) parts.push('Alt');
+  if (event.shiftKey) parts.push('Shift');
+  if (event.metaKey) parts.push('Meta');
+  if (event.code) parts.push(event.code);
+  return parts.join('+');
+}
+function comboMatches(event, spec) {
+  const want = comboParts(spec);
+  if (!want.length) return false;
+  const code = want[want.length - 1];
+  if (code !== event.code) return false;
+  const mods = { Ctrl: event.ctrlKey, Alt: event.altKey, Shift: event.shiftKey, Meta: event.metaKey };
+  for (const mod of want.slice(0, -1)) {
+    if (!mods[mod]) return false;
+  }
+  for (const [mod, pressed] of Object.entries(mods)) {
+    if (pressed && !want.includes(mod)) return false;
+  }
+  return true;
+}
+function formatCombo(spec) {
+  return comboParts(spec).map((part) => {
+    if (part === 'Alt' || part === 'Ctrl' || part === 'Shift' || part === 'Meta') return part;
+    if (part === 'Space') return 'Пробел';
+    return String(part)
+      .replace(/^Key/, '')
+      .replace(/^Digit/, '')
+      .replace(/^Numpad/, 'Num ')
+      .replace(/^Arrow/, '');
+  }).join(' + ');
+}
+function isTypingTarget(target) {
+  if (!target) return false;
+  const tag = String(target.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
+function roomList() {
+  const rooms = [];
+  for (const item of store.dms || []) rooms.push(item.room);
+  for (const room of store.channels || []) rooms.push(room);
+  return rooms;
+}
+function cycleRoom(delta) {
+  const rooms = roomList();
+  if (!rooms.length) return;
+  let index = rooms.indexOf(store.room);
+  if (index < 0) index = 0;
+  index = (index + delta + rooms.length) % rooms.length;
+  openRoomByKey(rooms[index]);
+}
+const HOTKEYS = [
+  { keys: ['Ctrl+KeyK', 'Ctrl+KeyF'], label: 'Поиск по истории', run: () => { const btn = $('searchBtn'); if (btn) btn.click(); } },
+  { keys: ['Alt+ArrowUp'], label: 'Предыдущий чат', run: () => cycleRoom(-1) },
+  { keys: ['Alt+ArrowDown'], label: 'Следующий чат', run: () => cycleRoom(1) },
+  { keys: ['Alt+KeyM'], label: 'Микрофон вкл/выкл', run: () => { if (store.voiceRoom) $('micBtn').click(); } },
+  { keys: ['Alt+KeyE'], label: 'Показать/остановить экран', run: () => { if (store.voiceRoom) openScreenDialog(); } },
+  { keys: ['Alt+Shift+KeyQ'], label: 'Выйти из голосового', run: () => { if (store.voiceRoom) leaveVoice(); } },
+  { keys: ['Alt+KeyJ'], label: 'Открыть «Друзья»', run: () => { const btn = $('navFriends'); if (btn) btn.click(); } },
+  { keys: ['Alt+KeyI'], label: 'Скопировать ссылку-приглашение', run: () => { const btn = $('navInvite'); if (btn) btn.click(); } },
+];
+function findHotkey(event) {
+  return HOTKEYS.find((item) => item.keys.some((spec) => comboMatches(event, spec)));
+}
+document.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented) return;
+  // «Нажми и говори»: пока держат комбинацию, микрофон открыт. В полях ввода
+  // комбинацию не перехватываем, чтобы можно было печатать.
+  if (pttModeOn() && store.voiceRoom && !isTypingTarget(event.target) && comboMatches(event, S().pttKey)) {
+    if (!pttHeld) { pttHeld = true; renderVoiceBox(); }
+    event.preventDefault();
+    return;
+  }
+  if (isTypingTarget(event.target)) return;
+  if (event.repeat) return;
+  const hot = findHotkey(event);
+  if (!hot) return;
+  event.preventDefault();
+  hot.run();
+});
+document.addEventListener('keyup', (event) => {
+  if (!pttHeld) return;
+  // Отпустили саму клавишу или любую из модификаторов — микрофон закрываем.
+  if (!comboMatches(event, S().pttKey) && !MODIFIER_CODES.includes(event.code)) return;
+  pttHeld = false;
+  renderVoiceBox();
+});
+window.addEventListener('blur', () => {
+  if (!pttHeld) return;
+  pttHeld = false;
+  renderVoiceBox();
+});
+
+async function startScreen() {
+  if (!store.voiceRoom) {
     toast('Сначала войдите в голосовой канал');
     return;
   }
@@ -5709,10 +6086,17 @@ async function startScreen() {  if (!store.voiceRoom) {
   }
   let stream;
   const fps = screenFpsValue();
+  const quality = screenQualityValue();
+  const size = screenQualitySize(quality);
+  const videoConstraints = { frameRate: { ideal: fps, max: fps } };
+  if (size) {
+    videoConstraints.width = { ideal: size[0] };
+    videoConstraints.height = { ideal: size[1] };
+  }
   try {
     // В приложении со звуком: на Windows захватывается звук системы.
     stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: fps, max: fps } },
+      video: videoConstraints,
       audio: !!bridge,
     });
   } catch (error) {
@@ -5722,6 +6106,7 @@ async function startScreen() {  if (!store.voiceRoom) {
   store.screenStream = stream;
   store.screenOn = true;
   store.screenFps = fps;
+  store.screenQuality = quality;
   const track = stream.getVideoTracks()[0];
   if (track) {
     track.onended = () => stopScreen(true);
@@ -5735,7 +6120,7 @@ async function startScreen() {  if (!store.voiceRoom) {
     try {
       stream.getTracks().forEach((t) => {
         const sender = peer.pc.addTrack(t, stream);
-        if (t.kind === 'video') tuneScreenSender(sender, fps);
+        if (t.kind === 'video') tuneScreenSender(sender, fps, quality);
       });
       send({ t: 'rtc', to: name, kind: 'renego' });
     } catch (error) {}
@@ -5820,9 +6205,31 @@ function renderCall() {
   if (!users.length) grid.appendChild(el('div', 'ep-empty', 'В канале пока никого'));
 }
 
-if ($('screenBtn')) $('screenBtn').onclick = () => startScreen();
+if ($('screenBtn')) $('screenBtn').onclick = () => openScreenDialog();
 if ($('callOpen')) $('callOpen').onclick = () => showCall();
 if ($('callClose')) $('callClose').onclick = () => hideCall();
+if ($('callHangup')) $('callHangup').onclick = () => leaveVoice();
+
+/* ------------------------------------------------ колесо мыши 1.8.0 */
+// Колесо над любым местом ленты (включая шапку и панели справа) крутит
+// сообщения. Раньше колесо над шапкой «терялось» и лента не двигалась.
+document.addEventListener('wheel', (event) => {
+  const box = $('messages');
+  if (!box || box.classList.contains('hidden')) return;
+  if (event.ctrlKey) return; // масштаб браузера не трогаем
+  const target = event.target;
+  if (!target || isTypingTarget(target)) return;
+  let node = target;
+  while (node && node !== document.body) {
+    if (node === box) return; // обычная прокрутка самой ленты
+    const style = getComputedStyle(node);
+    if (node.scrollHeight > node.clientHeight + 4 && /(auto|scroll)/.test(style.overflowY)) return;
+    node = node.parentElement;
+  }
+  if (!event.deltaY) return;
+  box.scrollTop += event.deltaY;
+  event.preventDefault();
+}, { passive: false });
 
 /* ------------------------------------------------------------------ старт */
 // Ссылка с приглашением: /?invite=CODE — сразу открываем регистрацию с кодом.

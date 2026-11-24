@@ -255,6 +255,25 @@ C.send({ t: 'settings_update', settings: { screenFps: 1 } });
 const fps1 = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.screenFps === 15, 2000, 'screenFps min');
 check('слишком маленькое значение поднимается до 15', !!fps1, JSON.stringify(fps1 && fps1.settings && fps1.settings.screenFps));
 
+// Остальные настройки демонстрации, микрофона и клавиши — тоже проверяются.
+C.send({ t: 'settings_update', settings: { screenQuality: '720', screenAsk: false, micSensitivity: 80, voiceMode: 'ptt', pttKey: 'Alt+KeyQ' } });
+const voiceSettings = await C.waitFresh((m) => m.t === 'settings' && m.settings
+  && m.settings.screenQuality === '720' && m.settings.screenAsk === false
+  && m.settings.micSensitivity === 80 && m.settings.voiceMode === 'ptt' && m.settings.pttKey === 'Alt+KeyQ', 2500, 'voice settings');
+check('настройки показа, микрофона и клавиши сохраняются', !!voiceSettings,
+  JSON.stringify(voiceSettings && voiceSettings.settings && {
+    q: voiceSettings.settings.screenQuality,
+    ask: voiceSettings.settings.screenAsk,
+    sens: voiceSettings.settings.micSensitivity,
+    mode: voiceSettings.settings.voiceMode,
+    key: voiceSettings.settings.pttKey,
+  }));
+C.send({ t: 'settings_update', settings: { screenQuality: '4k', micSensitivity: 500 } });
+const clamped = await C.waitFresh((m) => m.t === 'settings' && m.settings
+  && m.settings.screenQuality === '720' && m.settings.micSensitivity === 100, 2000, 'settings clamp');
+check('недопустимые значения не ломают настройки', !!clamped,
+  JSON.stringify(clamped && clamped.settings && { q: clamped.settings.screenQuality, s: clamped.settings.micSensitivity }));
+
 // --- приватность лички -------------------------------------------------------
 C.send({ t: 'settings_update', settings: { dmPrivacy: 'friends' } });
 await C.waitFresh((m) => m.t === 'settings', 2000, 'settings');
@@ -283,7 +302,7 @@ if (toDelete) {
 }
 
 // --- версия 1.4.0: реакции, ответы, картинки, поиск, push --------------------
-check('hello знает версию 1.7.x', !!(helloA && /^1\.7\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
+check('hello знает версию 1.7.x', !!(helloA && /^1\.8\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
 check('hello отдаёт VAPID-ключ', !!(helloA && typeof helloA.pushKey === 'string' && helloA.pushKey.length > 40),
   helloA && String(helloA.pushKey).slice(0, 20));
 

@@ -1,8 +1,8 @@
-version: 1.7.0
+version: 1.8.0
 files:
-  - url: Arc-Setup-1.7.0.exe
-    sha512: Ksou21N9F1qjC/5cjlOBPzmIZoXzB0it83MfhyRCCJXog0VhKV4W3hq5pP3DJG/pWCU+cRc93cSfrgatmZbtAw==
-    size: 121656766
-path: Arc-Setup-1.7.0.exe
-sha512: Ksou21N9F1qjC/5cjlOBPzmIZoXzB0it83MfhyRCCJXog0VhKV4W3hq5pP3DJG/pWCU+cRc93cSfrgatmZbtAw==
-releaseDate: '2026-11-24T14:38:31.302Z'
+  - url: Arc-Setup-1.8.0.exe
+    sha512: WARtCsRRx3FwNJ8+XqQU9kelJX+mmOzPfwRYPcln6TRgu5oVfKc4Y9sdd4KGw31ROOFp1/kyRpPF2UzPtCxewg==
+    size: 121656797
+path: Arc-Setup-1.8.0.exe
+sha512: WARtCsRRx3FwNJ8+XqQU9kelJX+mmOzPfwRYPcln6TRgu5oVfKc4Y9sdd4KGw31ROOFp1/kyRpPF2UzPtCxewg==
+releaseDate: '2026-11-24T14:58:51.281Z'

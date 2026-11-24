@@ -4,7 +4,7 @@
 
 import { mxDefault, mxNorm, mxPublic, mxSend, mxSync, mxWhoami } from './matrix.js';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const HISTORY_LIMIT = 300;
 const MAX_TEXT_CHARS = 4000;
 // Приватные каналы (1.5.0): канал виден только создателю и тем, кого он позвал.
@@ -93,6 +93,10 @@ function defaultSettings() {
     notifyTone: 'chime',  // chime | pop | blip
     voiceMode: 'activity',// activity | ptt
     screenFps: 30,        // 15 | 30 | 60 — плавность демонстрации экрана
+    screenQuality: 'auto',// auto | 720 | 1080 — разрешение демонстрации
+    screenAsk: true,      // спрашивать настройки при каждом включении показа
+    micSensitivity: 50,   // 0..100 — порог срабатывания микрофона
+    pttKey: 'Alt+KeyV',   // комбинация «нажми и говори»
     voiceInput: '',       // deviceId микрофона
     voiceOutput: '',      // deviceId наушников
     voiceVolume: 100,     // 0..200
@@ -125,6 +129,14 @@ function mergeSettings(base, patch) {
     const fps = num(patch.screenFps, 10, 60, out.screenFps);
     out.screenFps = fps >= 50 ? 60 : fps >= 25 ? 30 : 15;
   }
+  if (patch.screenQuality === 'auto' || patch.screenQuality === '720' || patch.screenQuality === '1080') {
+    out.screenQuality = patch.screenQuality;
+  }
+  if (patch.screenAsk !== undefined) out.screenAsk = !!patch.screenAsk;
+  if (patch.micSensitivity !== undefined) {
+    out.micSensitivity = num(patch.micSensitivity, 0, 100, out.micSensitivity);
+  }
+  if (typeof patch.pttKey === 'string') out.pttKey = clip(patch.pttKey, 40);
   if (patch.searchPrivacy === 'all' || patch.searchPrivacy === 'friends') out.searchPrivacy = patch.searchPrivacy;
   for (const flag of ['compact', 'showTime', 'enterToSend', 'notifySound', 'notifyDesktop', 'notifyAll', 'dnd', 'showTyping', 'showAvatars', 'groupMessages', 'clock24', 'noiseSuppress', 'echoCancel', 'autoGain']) {
     if (typeof patch[flag] === 'boolean') out[flag] = patch[flag];
@@ -1408,14 +1420,17 @@ export class ChatHub {
       demo: true,
     };
     this.ensureChannelCode(room);
-    for (const text of this.demoTutorial()) {
+    const lines = this.demoTutorial();
+    for (let i = 0; i < lines.length; i += 1) {
       this.store.seq = (this.store.seq || 0) + 1;
       this.pushMessage(room, {
         id: this.store.seq,
         room,
         author: 'Arc',
-        text,
-        ts: now(),
+        text: lines[i],
+        // Время немного разное, чтобы экскурсия выглядела перепиской, а не
+        // десятком сообщений в одну и ту же секунду.
+        ts: now() - (lines.length - i) * 7000,
         external: 'demo',
         authorProfile: { displayName: 'Arc', color: '#5865f2', avatar: '', avatarUrl: '', bio: '' },
       });
@@ -1519,8 +1534,7 @@ export class ChatHub {
   }
 
   // Голосовать можно в своём канале и в личке со своим собеседником.
-  voiceJoinAllowed(key, room) {
-    if (this.inChannel(key, room)) return true;
+  voiceJoinAllowed(key, room) {    if (this.inChannel(key, room)) return true;
     const pair = dmPartners(room);
     return !!pair && (pair[0] === key || pair[1] === key);
   }
@@ -1550,6 +1564,18 @@ export class ChatHub {
       if (members.size === 0) this.voice.delete(room);
     }
     return left;
+  }
+
+  // Выход из голоса в личке: второму участнику сразу говорим, что звонок
+  // закончился, иначе он остаётся «в звонке» с пустотой и не может звонить.
+  notifyVoiceLeft(room, name) {
+    const pair = dmPartners(room);
+    if (!pair) return;
+    const low = normalizeName(name);
+    const otherKey = pair[0] === low ? pair[1] : pair[0];
+    if (!this.store.users[otherKey]) return;
+    this.calls.delete(room);
+    this.sendTo(otherKey, { t: 'call_ended', room, by: name });
   }
 
   // ------------------------------------------------------------- запросы
@@ -2755,9 +2781,12 @@ export class ChatHub {
           if (this.store.tokenAt) delete this.store.tokenAt[tk];
         }
       }
-      this.voiceRemove(name);
-      await this.state.storage.delete('avatar:' + key);
-      if (this.store.avatars) delete this.store.avatars[key];
+      const leftVoice = this.voiceRemove(name);
+      if (leftVoice) {
+        this.broadcastVoice(leftVoice);
+        this.notifyVoiceLeft(leftVoice, name);
+      }
+      await this.state.storage.delete('avatar:' + key);      if (this.store.avatars) delete this.store.avatars[key];
       const mine = (this.store.stickers || []).filter((s) => normalizeName(s.by) === key);
       for (const s of mine) await this.state.storage.delete('sticker:' + s.id);
       this.store.stickers = (this.store.stickers || []).filter((s) => normalizeName(s.by) !== key);
@@ -3117,7 +3146,11 @@ export class ChatHub {
       // Канал или личка со своим собеседником — больше нигде голоса нет.
       if (!this.voiceJoinAllowed(key, room)) return;
       const old = this.voiceRemove(name);
-      if (old) this.broadcastVoice(old);
+      if (old) {
+        this.broadcastVoice(old);
+        // Уходим из голоса в личке — второму говорим, что звонок завершён.
+        this.notifyVoiceLeft(old, name);
+      }
       if (!this.voice.has(room)) this.voice.set(room, new Map());
       const members = this.voice.get(room);
       // Групповой звонок до VOICE_LIMIT человек: дальше не пускаем.
@@ -3146,7 +3179,13 @@ export class ChatHub {
       }
       // Себя занятым считаем тоже: в двух звонках одновременно не посидишь.
       const myRoom = this.voiceRoomOf(name);
-      if (myRoom && myRoom !== room) {
+      const myVoice = myRoom ? this.voice.get(myRoom) : null;
+      if (myVoice && myVoice.size <= 1 && myRoom !== room) {
+        // Остались одни в старом звонке (собеседник вышел) — вычищаем и звоним.
+        this.voiceRemove(name);
+        this.broadcastVoice(myRoom);
+        this.notifyVoiceLeft(myRoom, name);
+      } else if (myRoom && myRoom !== room) {
         this.sendTo(key, { t: 'error', text: 'Вы уже в звонке' });
         return;
       }
@@ -3202,7 +3241,12 @@ export class ChatHub {
 
     if (kind === 'voice_leave') {
       const room = this.voiceRemove(name);
-      if (room) this.broadcastVoice(room);
+      if (room) {
+        this.broadcastVoice(room);
+        // В личке второму участнику сообщаем, что звонок завершён.
+        this.notifyVoiceLeft(room, name);
+      }
+      this.dropCallsOf(name);
       return;
     }
 
@@ -3456,7 +3500,10 @@ export class ChatHub {
       const others = meta.key ? this.sockets(meta.key).filter((s) => s !== ws).length : 0;
       if (!others) {
         const room = this.voiceRemove(name);
-        if (room) this.broadcastVoice(room);
+        if (room) {
+          this.broadcastVoice(room);
+          this.notifyVoiceLeft(room, name);
+        }
         // Ушёл посреди звонка — снимаем приглашение и говорим второму.
         this.dropCallsOf(name);
       }

@@ -39,7 +39,7 @@ const page = await (await fetch(B + '/', { headers: { 'cache-control': 'no-cache
 check('в клиенте есть поле кода приглашения', page.includes('id="authInvite"'), '');
 check('в клиенте есть вкладка «Управление»', page.includes('data-tab="manage"'), '');
 check('в клиенте приватные каналы и панель участников', page.includes('openChannelPanel') && page.includes("t: 'channel_add'"), '');
-check('версия клиента 1.7.0', page.includes("APP_VERSION = '1.7.0'"), '');
+check('версия клиента 1.8.0', page.includes("APP_VERSION = '1.8.0'"), '');
 check('ссылка с приглашением работает', page.includes('inviteFromLink'), '');
 
 const exp = await fetch(B + '/api/export');

@@ -74,11 +74,11 @@ function check(name, cond, extra) {
 
 await sleep(150);
 const ws = sockets[0];
-check('версия клиента 1.7.0', window.APP_VERSION === '1.7.0' || $('body').textContent.includes('1.7.0'), 'APP_VERSION');
+check('версия клиента 1.8.0', window.APP_VERSION === '1.8.0' || $('body').textContent.includes('1.8.0'), 'APP_VERSION');
 ws.open();
 
 ws.push({
-  t: 'hello', version: '1.7.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
+  t: 'hello', version: '1.8.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
   me: { name: 'anna', color: '#5865f2', profile: { displayName: 'Анна', avatarUrl: '' }, status: 'online', settings: { status: 'online' } },
   channels: ['obshiy'],
   channelItems: [{ room: 'obshiy', title: 'obshiy', owner: 'anna', ownerKey: 'anna', mine: true, count: 1, members: [{ name: 'anna', displayName: 'Анна', online: true }] }],
@@ -118,6 +118,16 @@ await sleep(40);
 const reactionChips = [...doc.querySelectorAll('#messages .rx')];
 check('чипы реакций отрисованы', reactionChips.length > 0, 'chips=' + reactionChips.length);
 check('в чипе видно количество', reactionChips.some((c) => (c.textContent || '').includes('2')), reactionChips.map((c) => c.textContent).join('|'));
+
+// --- горячие клавиши ------------------------------------------------------
+doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true }));
+await sleep(60);
+check('Ctrl+K открывает поиск', !!$('#searchPane') && !$('#searchPane').classList.contains('hidden'),
+  $('#searchPane') ? $('#searchPane').className : 'нет панели');
+doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+await sleep(50);
+check('Esc закрывает поиск', !!$('#searchPane') && $('#searchPane').classList.contains('hidden'),
+  $('#searchPane') ? $('#searchPane').className : 'нет панели');
 
 // --- поиск по истории -----------------------------------------------------
 const searchBtn = $('#searchBtn, [data-act="search"], .search-btn');
@@ -198,6 +208,23 @@ if (voiceTabBtn) {
     const sent = ws.sent.filter((m) => m.t === 'settings_update' && m.settings && m.settings.screenFps === 60).pop();
     check('режим 60 кадров уходит на сервер', !!sent, JSON.stringify(ws.sent.filter((m) => m.t === 'settings_update').slice(-2)));
   }
+  const qualitySel = selects.find((s) => [...s.options].some((o) => o.value === '1080'));
+  check('настройка разрешения демонстрации есть', !!qualitySel, 'selects=' + selects.length);
+  const modeSel = selects.find((s) => [...s.options].some((o) => o.value === 'ptt'));
+  check('режим «нажми и говори» есть', !!modeSel, '');
+  const voiceText = ($('#settingsBody') ? $('#settingsBody').textContent : '') || '';
+  check('есть настройка чувствительности микрофона', voiceText.includes('Чувствительность'), '');
+  const pttBtn = [...doc.querySelectorAll('#settingsBody button')].find((b) => (b.textContent || '').includes('Alt') && (b.textContent || '').includes('V'));
+  check('кнопка записи комбинации есть', !!pttBtn, [...doc.querySelectorAll('#settingsBody button')].map((b) => b.textContent).join('|').slice(0, 200));
+  const hotRows = [...doc.querySelectorAll('#settingsBody .hk-row')];
+  check('список горячих клавиш показан', hotRows.length >= 8, 'rows=' + hotRows.length);
+  if (modeSel) {
+    modeSel.value = 'ptt';
+    modeSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await sleep(450);
+    const pttSent = ws.sent.filter((m) => m.t === 'settings_update' && m.settings && m.settings.voiceMode === 'ptt').pop();
+    check('режим «нажми и говори» уходит на сервер', !!pttSent, JSON.stringify(ws.sent.filter((m) => m.t === 'settings_update').slice(-2)));
+  }
 }
 const accountTabBtn = doc.querySelector('[data-tab="account"]');
 check('вкладка «Аккаунт» есть', !!accountTabBtn);
@@ -205,7 +232,7 @@ if (accountTabBtn) {
   accountTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await sleep(60);
   const bodyText = ($('#settingsBody') ? $('#settingsBody').textContent : '') || '';
-  check('в аккаунте видна версия', /1\.7\.\d+/.test(bodyText), bodyText.slice(0, 200));
+  check('в аккаунте видна версия', /1\.8\.\d+/.test(bodyText), bodyText.slice(0, 200));
   const passInputs = [...doc.querySelectorAll('#settingsBody input[type="password"]')];
   check('три поля для смены пароля', passInputs.length >= 3, 'inputs=' + passInputs.length);
   if (passInputs.length >= 3) {
