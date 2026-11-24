@@ -3464,7 +3464,19 @@ function tabAccount(body) {
   body.appendChild(sect4);
 
   const sect5 = el('div', 'sect');
-  sect5.appendChild(el('h4', '', 'Версия'));
+  sect5.appendChild(el('h4', '', 'Роль и версия'));
+  // Роль видна всегда: по ней понятно, почему в настройках есть или нет
+  // вкладок «Управление» и «Модерация».
+  const roleRow = mkRow('Ваша роль', store.isOwner
+    ? 'Владелец: приглашения, сотрудники, бан, удаление каналов'
+    : store.isStaff
+      ? 'Сотрудник: удаление любых сообщений и мьют'
+      : 'Участник: свои сообщения и каналы. Права выдаёт владелец');
+  const roleName = store.isOwner ? 'владелец' : store.isStaff ? 'сотрудник' : 'участник';
+  const roleText = el('strong', '', roleName);
+  roleText.style.color = store.isStaff ? 'var(--ok)' : 'var(--muted)';
+  roleRow.appendChild(roleText);
+  sect5.appendChild(roleRow);
   const bridge = desktopBridge();
   const verRow = mkRow('Версия приложения', 'Обновления страницы прилетают сами при открытии');
   const verText = el('strong', '', APP_VERSION + (bridge ? ' · оболочка…' : ''));
