@@ -1261,6 +1261,11 @@ function handle(data) {
         renderChannels();
         if (channelPanelOpen()) renderChannelPanel();
       }
+      // Число участников в шапке канала тоже могло измениться.
+      if (store.roomKind === 'channel' && store.room) {
+        const countEl = $('chanMembersCount');
+        if (countEl) countEl.textContent = String(channelMembersOf(store.room).length);
+      }
       break;
     }
     case 'channel_created': {
