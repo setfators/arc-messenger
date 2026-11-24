@@ -65,7 +65,10 @@ try {
   const leak = await waitFor(gws, (m) => m.t === 'msg' && m.text === 'секрет ' + stamp, 800);
   check('посторонний сообщение не получает', !leak, '');
 
-  send(ows, { t: 'channel_add', room, name: 'lvges' + stamp });
+  const ownerList = ows.got.filter((m) => m.t === 'channels').at(-1);
+  const inviteCode = ((ownerList && (ownerList.items || []).find((i) => i.room === room)) || {}).invite || '';
+  check('у канала есть ссылка-приглашение', !!inviteCode, String(inviteCode));
+  send(gws, { t: 'channel_join', code: inviteCode });
   const gList = await waitFor(gws, (m) => m.t === 'channels' && (m.channels || []).includes(room));
   check('после приглашения канал виден', !!gList, JSON.stringify(gList && gList.channels));
   const view = gList && (gList.items || []).find((i) => i.room === room);

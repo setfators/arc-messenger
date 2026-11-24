@@ -658,6 +658,7 @@
   <div class="auth-card">
     <h1>Arc</h1>
     <p class="hint">Аккаунт хранится на сервере: заходите с любого устройства под своим именем.</p>
+    <p class="hint hidden" id="authJoinHint">Вас пригласили в канал. Войдите или создайте аккаунт — и сразу окажетесь в нём.</p>
     <div class="tabs">
       <button class="tab active" id="tabLogin">Вход</button>
       <button class="tab" id="tabReg">Регистрация</button>
@@ -894,6 +895,18 @@
         <button class="pill" id="chanRenameBtn" type="button">Сохранить</button>
       </div>
     </div>
+    <div class="sect hidden" id="chanLinkSect">
+      <h4>Ссылка-приглашение</h4>
+      <div class="chan-row">
+        <input id="chanLink" readonly placeholder="Ссылка отключена" autocomplete="off">
+        <button class="primary" id="chanLinkCopy" type="button">Копировать</button>
+      </div>
+      <div class="chan-actions">
+        <button class="pill" id="chanLinkReset" type="button">Новая ссылка</button>
+        <button class="pill danger" id="chanLinkOff" type="button">Отключить</button>
+      </div>
+      <p class="hint" id="chanLinkHint"></p>
+    </div>
     <div class="chan-actions">
       <button class="pill hidden" id="chanLeave" type="button">Покинуть канал</button>
       <button class="pill danger hidden" id="chanDelete" type="button">Удалить канал</button>
@@ -935,6 +948,7 @@ const store = {
   // Приватные каналы (1.5.0): у каждого свой создатель и список участников.
   channelItems: [],
   panelRoom: null,
+  pendingJoin: '',
   room: null,
   roomKind: 'channel',
   roomTitle: '',
@@ -979,6 +993,26 @@ const store = {
   uploading: 0,
 };
 let authMode = 'login';
+
+// Ссылка-приглашение в канал: код запоминаем до входа в аккаунт, а вход
+// выполним сразу после подключения — так ссылка работает и для новых людей.
+(function readJoinLink() {
+  let code = '';
+  try { code = new URLSearchParams(location.search).get('join') || ''; } catch (_) { code = ''; }
+  if (!code) return;
+  store.pendingJoin = String(code).trim().toUpperCase();
+  const hint = $('authJoinHint');
+  if (hint && store.pendingJoin) hint.classList.remove('hidden');
+})();
+
+function stripJoinParam() {
+  try {
+    const url = new URL(location.href);
+    if (!url.searchParams.has('join')) return;
+    url.searchParams.delete('join');
+    history.replaceState({}, '', url.pathname + (url.search || '') + (url.hash || ''));
+  } catch (_) { /* старый браузер */ }
+}
 
 /* ------------------------------------------------------------------ утилиты */
 function toast(text) {
@@ -1348,6 +1382,13 @@ function handle(data) {
       if (params.get('settings')) setTimeout(() => openSettings(currentTab), 60);
       if (store.room) send({ t: 'join', room: store.room });
       if (store.voiceRoom) send({ t: 'voice_join', room: store.voiceRoom });
+      // Пришли по ссылке-приглашению: входим в канал сразу после подключения.
+      if (store.pendingJoin) {
+        const code = store.pendingJoin;
+        store.pendingJoin = '';
+        send({ t: 'channel_join', code });
+        stripJoinParam();
+      }
       askNotifyPermission();
       maybeSubscribePush();
       break;
@@ -1398,6 +1439,10 @@ function handle(data) {
         if (left.length) openRoom(left[0], 'channel', '# ' + channelTitleOf(left[0]));
         else showNoChannels();
       }
+      break;
+    }
+    case 'invite_join_failed': {
+      toast(data.text || 'Ссылка недействительна или устарела');
       break;
     }
     case 'profile': {
@@ -1730,6 +1775,13 @@ function channelMembersOf(room) {
   const one = channelByRoom(room);
   return one && Array.isArray(one.members) ? one.members : [];
 }
+// Полная ссылка-приглашение: в браузере — адрес сайта, в приложении — адрес
+// сервера из window.__ARC_SERVER__, чтобы ссылку можно было отправить другу.
+function channelInviteLink(one) {
+  if (!one || !one.invite) return '';
+  const base = String(SERVER || location.origin).replace(/\/+$/, '');
+  return base + '/?join=' + encodeURIComponent(one.invite);
+}
 // Файлы вложений приватные: к ссылке добавляем свой токен, иначе сервер
 // откажется отдавать картинку чужому человеку.
 function mediaUrl(meta) {
@@ -1979,8 +2031,19 @@ function renderChannelPanel() {
   // Приглашать, переименовывать и удалять может только создатель.
   $('chanAddSect').classList.toggle('hidden', !one.mine);
   $('chanRenameSect').classList.toggle('hidden', !one.mine);
+  $('chanLinkSect').classList.toggle('hidden', !one.mine);
   $('chanLeave').classList.toggle('hidden', !!one.mine);
   $('chanDelete').classList.toggle('hidden', !one.mine);
+  if (one.mine) {
+    const link = channelInviteLink(one);
+    $('chanLink').value = link;
+    $('chanLinkCopy').disabled = !link;
+    $('chanLinkOff').classList.toggle('hidden', !link);
+    $('chanLinkReset').textContent = link ? 'Новая ссылка' : 'Создать ссылку';
+    $('chanLinkHint').textContent = link
+      ? 'Кто угодно с этой ссылкой сможет войти в канал. Приглашений по ссылке: ' + (one.inviteUses || 0) + '.'
+      : 'Ссылка отключена: новые люди по ней не войдут.';
+  }
   if (one.mine) {
     const inside = new Set((one.members || []).map((p) => String(p.name).toLowerCase()));
     const picks = ((store.friends && store.friends.friends) || [])
@@ -2049,6 +2112,33 @@ $('chanDelete').onclick = async () => {
 $('wcDemo').onclick = () => send({ t: 'demo_open' });
 $('wcFriend').onclick = () => $('navFriends').onclick();
 $('wcCreate').onclick = () => $('newChannel').click();
+
+/* ------------------------------------------------ ссылка-приглашение 1.6.0 */
+$('chanLinkCopy').onclick = async () => {
+  const link = $('chanLink').value;
+  if (!link) return;
+  try {
+    await navigator.clipboard.writeText(link);
+    toast('Ссылка скопирована');
+  } catch (_) {
+    prompt('Скопируйте ссылку и отправьте другу:', link);
+  }
+};
+$('chanLinkReset').onclick = () => {
+  const room = store.panelRoom;
+  if (room) send({ t: 'channel_invite_reset', room });
+};
+$('chanLinkOff').onclick = async () => {
+  const room = store.panelRoom;
+  if (!room) return;
+  const ok = await openDialog({
+    title: 'Отключить ссылку?',
+    text: 'По текущей ссылке больше никто не войдёт в канал. Новую можно создать в любой момент.',
+    ok: 'Отключить',
+    danger: true,
+  });
+  if (ok) send({ t: 'channel_invite_off', room });
+};
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '😮', '😢'];
 

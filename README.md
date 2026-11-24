@@ -28,6 +28,9 @@ Arc — мессенджер для своих: приватные каналы,
 - **каналы приватные**: новый канал видит только его создатель; он зовёт друзей через панель
   канала (👥 в шапке), и до этого момента канал не появляется ни у кого другого. Список каналов
   у каждого свой — сервер отдаёт его адресно, а не рассылкой;
+- **приглашение ссылкой**: у каждого канала есть ссылка вида `.../?join=КОД` — её видит только
+  создатель в панели канала; кто откроет ссылку, тот войдёт в канал (даже без аккаунта — после
+  входа в приложение). Ссылку можно обновить (старая сразу перестаёт работать) или отключить;
 - **личные сообщения — основа**: диалоги в списке сразу под «Друзьями»; переписку можно убрать
   из списка;
 - панель канала: участники (кто в сети), «позвать друга» одним нажатием, переименование,
@@ -132,7 +135,8 @@ Durable Object, поэтому переживает перезапуск и пе
 - клиент → сервер: `join`, `dm_open`, `msg` (с полями `replyTo` и `mediaId`), `msg_react`,
   `search_messages`, `typing`, `ping`, `friend_add`, `friend_accept`, `friend_remove`, `dm_delete`,
   `msg_delete`, `create`, `channel_add`, `channel_kick`, `channel_leave`, `channel_rename`,
-  `channel_delete`, `demo_open`, `stats_get`, `voice_join`, `voice_leave`, `voice_mute`,
+  `channel_delete`, `channel_invite_reset`, `channel_invite_off`, `channel_join`,
+  `demo_open`, `stats_get`, `voice_join`, `voice_leave`, `voice_mute`,
   `voice_screen`, `rtc`, `settings_update`, `profile_update`, `avatar_upload`, `avatar_delete`,
   `sticker_add`, `sticker_delete`, `search_users`, `user_card`, `password_change`, `logout_all`,
   `account_delete`, `logout`, `push_subscribe`, `push_unsubscribe`, `matrix_get`, `matrix_set`,
@@ -142,7 +146,8 @@ Durable Object, поэтому переживает перезапуск и пе
   `channel_added`, `channel_removed`, `history`, `msg`, `msg_delete`, `msg_reaction`, `search_results`,
   `typing`, `presence`, `friends`, `dm_list`, `voice_state`, `rtc`, `pong`, `error`, `notice`,
   `logged_out`, `profile`, `profile_changed`, `settings`, `avatar_changed`, `sticker_pack`,
-  `matrix_state`, `user_search`, `user_card`, `account_deleted`, `stats` (счётчики для владельца).
+  `matrix_state`, `user_search`, `user_card`, `account_deleted`, `stats` (счётчики для владельца),
+  `invite_join_failed` (ссылка в канал не сработала).
 
 Поля и формы ответов:
 

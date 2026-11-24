@@ -10,7 +10,8 @@ const check = (name, cond, extra) => {
 const page = await (await fetch(B + '/', { headers: { 'cache-control': 'no-cache' } })).text();
 check('есть пустое состояние каналов', page.includes('function showNoChannels'));
 check('есть экран знакомства', page.includes('Добро пожаловать в Arc') && page.includes('Открыть демо-канал'));
-check('демо-канал и статистика на месте', page.includes('ensureDemoChannel') === false && page.includes('demo_open') && page.includes('stats_get'));
+check('демо-канал и статистика на месте', page.includes('demo_open') && page.includes('stats_get'));
+check('ссылка-приглашение в канале', page.includes('channelJoin') === false && page.includes('channel_join') && page.includes('channelInviteLink'));
 check('каналы приватные: замок и число участников', page.includes("'lock', '🔒'") && page.includes("'cnt'"));
 check('удаление общего канала не блокируется', !page.includes('Общий канал удалить нельзя'));
 check('звонки в личке на месте', page.includes('startDmCall') && page.includes('callBox'));

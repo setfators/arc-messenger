@@ -11,6 +11,7 @@ const MAX_TEXT_CHARS = 4000;
 const CHANNEL_TITLE_MAX = 60;
 const CHANNEL_MEMBERS_MAX = 40;   // участников в одном канале
 const CHANNEL_OWN_MAX = 20;       // своих каналов у одного человека
+const CHANNEL_CODE_LEN = 10;      // длина кода в ссылке-приглашении
 
 // Групповой звонок: столько человек одновременно в одном голосовом канале.
 const VOICE_LIMIT = 8;
@@ -303,6 +304,7 @@ export class ChatHub {
         // Приватные каналы (1.5.0): у каждого канала есть владелец и участники.
         // Каналы больше не общие — их видит только создатель и приглашённые.
         if (!this.store.channelMeta) this.store.channelMeta = {};
+        if (!this.store.channelCodes) this.store.channelCodes = {};
         for (const room of this.store.channels) {
           if (!Array.isArray(this.store.rooms[room])) this.store.rooms[room] = [];
         }
@@ -363,6 +365,19 @@ export class ChatHub {
         // Метаданные удалённых каналов не храним: иначе база растёт вечно.
         for (const room of Object.keys(this.store.channelMeta)) {
           if (!this.store.channels.includes(room)) delete this.store.channelMeta[room];
+        }
+        // Ссылки-приглашения (1.7.0): старым каналам выдаём код, чтобы владелец
+        // сразу мог позвать человека ссылкой, а коды удалённых каналов убираем.
+        for (const room of this.store.channels) {
+          const meta = this.store.channelMeta[room];
+          if (!meta) continue;
+          const item = this.store.channelCodes[room];
+          if (!item || !item.code) {
+            this.store.channelCodes[room] = { code: this.channelCode(), created: now(), uses: 0 };
+          }
+        }
+        for (const room of Object.keys(this.store.channelCodes)) {
+          if (!this.store.channels.includes(room)) delete this.store.channelCodes[room];
         }
         // Вложения до 1.5.0 не знали своего канала: проставляем комнату по
         // истории, чтобы старые картинки открывались у участников канала.
@@ -717,6 +732,7 @@ export class ChatHub {
         this.store.channels = this.store.channels.filter((c) => c !== room);
         delete this.store.rooms[room];
         delete this.store.channelMeta[room];
+        this.dropChannelCode(room);
         removed += 1;
       }
     }
@@ -1243,6 +1259,11 @@ export class ChatHub {
       members: people,
       count: people.length,
       created: meta ? meta.created || 0 : 0,
+      // Ссылку-приглашение видит только создатель: для остальных её просто нет.
+      invite: meta && meta.owner === viewerKey ? this.channelCodeOf(room) : '',
+      inviteUses: meta && meta.owner === viewerKey
+        ? Number(((this.store.channelCodes || {})[room] || {}).uses) || 0
+        : 0,
     };
   }
 
@@ -1292,6 +1313,55 @@ export class ChatHub {
     return room;
   }
 
+  // ------------------------------------------- ссылка-приглашение 1.6.0
+  // Код — это право войти в канал: у кого ссылка, тот и станет участником,
+  // пока создатель не сменит или не отключит код.
+  channelCode() {
+    let code = '';
+    const bytes = crypto.getRandomValues(new Uint8Array(CHANNEL_CODE_LEN));
+    for (const b of bytes) code += INVITE_CODE_CHARS[b % INVITE_CODE_CHARS.length];
+    return code;
+  }
+
+  channelCodeOf(room) {
+    const item = (this.store.channelCodes || {})[room];
+    return item && item.code ? item.code : '';
+  }
+
+  ensureChannelCode(room) {
+    if (!this.store.channelCodes) this.store.channelCodes = {};
+    const code = this.channelCodeOf(room);
+    if (code) return code;
+    const fresh = this.channelCode();
+    this.store.channelCodes[room] = { code: fresh, created: now(), uses: 0 };
+    return fresh;
+  }
+
+  resetChannelCode(room) {
+    if (!this.store.channelCodes) this.store.channelCodes = {};
+    const fresh = this.channelCode();
+    const previous = this.store.channelCodes[room] || {};
+    this.store.channelCodes[room] = { code: fresh, created: now(), uses: 0, previous: previous.code || '' };
+    return fresh;
+  }
+
+  dropChannelCode(room) {
+    if (this.store.channelCodes) delete this.store.channelCodes[room];
+  }
+
+  // Ищем канал по коду ссылки. Коды одноразрядные по регистру, поэтому
+  // приводим ввод к верхнему регистру.
+  roomByChannelCode(code) {
+    const wanted = String(code || '').trim().toUpperCase();
+    if (!wanted) return '';
+    for (const [room, item] of Object.entries(this.store.channelCodes || {})) {
+      if (!item || item.code !== wanted) continue;
+      if (!this.store.channels.includes(room)) continue;
+      return room;
+    }
+    return '';
+  }
+
   pushMessage(room, message) {
     if (!this.store.rooms[room]) this.store.rooms[room] = [];
     const list = this.store.rooms[room];
@@ -1331,6 +1401,7 @@ export class ChatHub {
       created: now(),
       demo: true,
     };
+    this.ensureChannelCode(room);
     for (const text of this.demoTutorial()) {
       this.store.seq = (this.store.seq || 0) + 1;
       this.pushMessage(room, {
@@ -2722,6 +2793,7 @@ export class ChatHub {
       this.store.channels = this.store.channels.filter((c) => c !== room);
       delete this.store.rooms[room];
       delete this.store.channelMeta[room];
+      this.dropChannelCode(room);
       await this.save();
       this.broadcastChannels();
       for (const who of was) {
@@ -2764,6 +2836,9 @@ export class ChatHub {
         title,
         created: now(),
       };
+      // У каждого канала сразу есть ссылка-приглашение: владельцу не нужно
+      // делать лишний шаг, чтобы позвать человека.
+      this.ensureChannelCode(room);
       await this.save();
       this.sendChannels(key);
       this.sendTo(key, { t: 'history', room, messages: [] });
@@ -2855,6 +2930,8 @@ export class ChatHub {
       }
       await this.save();
       this.sendChannels(key);
+      // Остальным участникам — свежий состав: счётчик в шапке должен совпасть.
+      for (const who of this.channelMembers(room)) this.sendChannels(who);
       this.sendChannel(room, { t: 'notice', text: name + ' вышел из канала' });
       this.sendTo(key, { t: 'channel_removed', room });
       return;
@@ -2881,10 +2958,83 @@ export class ChatHub {
       return;
     }
 
+    // Ссылка-приглашение: создать заново (старая перестаёт работать).
+    if (kind === 'channel_invite_reset') {
+      const room = String(value.room || '').trim();
+      if (!this.ownsChannel(key, room)) {
+        this.sendTo(key, { t: 'error', text: 'Менять ссылку может только создатель канала' });
+        return;
+      }
+      this.resetChannelCode(room);
+      await this.save();
+      this.sendChannels(key);
+      this.sendTo(key, { t: 'notice', text: 'Ссылка обновлена — старая больше не работает' });
+      return;
+    }
+
+    // Отключить ссылку: по ней больше нельзя войти, пока не создадут новую.
+    if (kind === 'channel_invite_off') {
+      const room = String(value.room || '').trim();
+      if (!this.ownsChannel(key, room)) {
+        this.sendTo(key, { t: 'error', text: 'Отключить ссылку может только создатель канала' });
+        return;
+      }
+      this.dropChannelCode(room);
+      await this.save();
+      this.sendChannels(key);
+      this.sendTo(key, { t: 'notice', text: 'Ссылка отключена' });
+      return;
+    }
+
+    // Вход в канал по ссылке. Код — право войти, поэтому проверяем только его,
+    // лимит участников и частоту попыток.
+    if (kind === 'channel_join') {
+      const code = String(value.code || '').trim().toUpperCase();
+      const room = this.roomByChannelCode(code);
+      if (!room) {
+        this.sendTo(key, { t: 'invite_join_failed', text: 'Ссылка недействительна или устарела' });
+        return;
+      }
+      const meta = this.channelMeta(room);
+      const members = Array.isArray(meta.members) ? meta.members : [];
+      const title = this.channelTitle(room);
+      if (members.includes(key)) {
+        // Уже участник: просто открываем канал, ссылку не расходуем.
+        this.sendChannels(key);
+        this.sendTo(key, { t: 'history', room, messages: this.store.rooms[room] || [] });
+        this.sendTo(key, { t: 'channel_created', room });
+        this.sendTo(key, { t: 'notice', text: 'Вы уже в канале #' + title });
+        return;
+      }
+      const rate = this.rateAllow(key, 'joinchannel', 10, 60 * 1000);
+      if (!rate.ok) {
+        this.sendTo(key, { t: 'error', text: 'Слишком много попыток. Подождите ' + rate.retry + ' с.' });
+        return;
+      }
+      if (members.length >= CHANNEL_MEMBERS_MAX) {
+        this.sendTo(key, { t: 'invite_join_failed', text: 'В канале уже ' + CHANNEL_MEMBERS_MAX + ' участников' });
+        return;
+      }
+      meta.members = members.concat([key]);
+      const item = (this.store.channelCodes || {})[room];
+      if (item) item.uses = (Number(item.uses) || 0) + 1;
+      await this.save();
+      this.sendTo(key, { t: 'notice', text: 'Вы в канале #' + title });
+      this.sendChannels(key);
+      // Создателю сразу приходит обновлённый состав, а не только уведомление.
+      if (meta.owner && meta.owner !== key) this.sendChannels(meta.owner);
+      this.sendTo(key, { t: 'history', room, messages: this.store.rooms[room] || [] });
+      this.sendTo(key, { t: 'channel_created', room });
+      for (const who of this.channelMembers(room)) {
+        if (who === key) continue;
+        this.sendTo(who, { t: 'notice', text: name + ' присоединился по ссылке' });
+      }
+      return;
+    }
+
     // Кнопка «Открыть демо-канал» на экране знакомства. Повторное нажатие
     // возвращает тот же канал, а не плодит новые.
-    if (kind === 'demo_open') {
-      const room = this.ensureDemoChannel(key);
+    if (kind === 'demo_open') {      const room = this.ensureDemoChannel(key);
       if (!room) return;
       await this.save();
       this.sendChannels(key);
