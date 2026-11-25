@@ -488,6 +488,55 @@
   .screen-stage.hidden { display: none; }
   .screen-stage video { width: 100%; height: 100%; object-fit: contain; background: #000; }
   .screen-cap { position: absolute; left: 10px; bottom: 10px; background: rgba(0,0,0,.65); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+  /* Галерея экранов 1.8.2: мини-превью всех шареров, клик — в большой экран. */
+  .screen-split {
+    flex: 1; min-height: 160px; display: grid; gap: 10px;
+    grid-template-columns: 1fr 1fr; align-content: stretch;
+  }
+  .screen-split.hidden { display: none; }
+  .screen-split[data-count="3"], .screen-split[data-count="4"],
+  .screen-split[data-count="5"], .screen-split[data-count="6"] {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+  .screen-cell {
+    position: relative; background: #000; border-radius: 12px; overflow: hidden;
+    border: 2px solid var(--line); padding: 0; min-height: 0; cursor: zoom-in;
+  }
+  .screen-cell video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+  .screen-cell:hover { border-color: var(--accent); }
+  .screen-cell .scr-cell-name {
+    position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 20px);
+    background: rgba(0,0,0,.65); color: #fff; padding: 4px 9px; border-radius: 6px;
+    font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .screen-tiles {
+    display: flex; gap: 10px; padding: 0 2px; overflow-x: auto; flex: 0 0 auto;
+  }
+  .screen-tiles.hidden { display: none; }
+  .scr-tile {
+    position: relative; flex: 0 0 auto; width: 210px; height: 118px; border-radius: 10px;
+    border: 2px solid var(--line); background: #000; overflow: hidden; cursor: pointer;
+    padding: 0;
+  }
+  .scr-tile video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+  .scr-tile .scr-tile-name {
+    position: absolute; left: 6px; bottom: 6px; right: 6px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+    background: rgba(0,0,0,.6); color: #fff; padding: 2px 6px; border-radius: 5px; font-size: 11px;
+  }
+  .scr-tile.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .scr-tile:hover { border-color: var(--muted); }
+  .scr-tile-all {
+    display: grid; place-items: center; width: 120px; color: var(--text);
+    font-size: 12px; border-style: dashed;
+  }
+  .scr-tile-all .scr-tile-name {
+    position: static; background: none; padding: 0; white-space: normal; text-align: center;
+  }
+  .scr-empty-tile {
+    display: grid; place-items: center; color: var(--muted); font-size: 12px; text-align: center;
+    border: 1px dashed var(--line); border-radius: 10px; width: 210px; height: 118px; flex: 0 0 auto;
+  }
   .call-grid.n6, .call-grid.n7, .call-grid.n8 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .src-dlg { width: min(880px, 94vw); }
   .src-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; max-height: 56vh; overflow-y: auto; padding: 4px; margin: 8px 0 14px; }
@@ -681,6 +730,11 @@
     .att-img { max-width: min(260px, 100%); }
     .search-head { padding: 10px 12px; }
     .reply-bar { padding: 6px 12px; }
+    /* Два экрана на телефоне — друг под другом, а не сжатые в полоску. */
+    .screen-split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .screen-split[data-count="3"], .screen-split[data-count="4"] { grid-template-columns: 1fr; grid-template-rows: none; }
+    .scr-tile { width: 150px; height: 88px; }
+    .scr-tile-all { width: 100px; }
   }
 
   /* ---------- адаптивность 1.8.1 ---------- */
@@ -920,6 +974,7 @@
   <div class="call-head">
     <div class="call-title" id="callTitle">Звонок</div>
     <div class="call-people" id="callCount"></div>
+    <button class="pill hidden" id="callAllScreens" type="button" title="Показать все экраны вместе">Все экраны</button>
     <button class="pill hidden" id="callSwitch" type="button" title="Показать другой экран">Сменить экран</button>
     <button class="pill danger call-hang" id="callHangup" type="button">Завершить</button>
     <button class="cbtn" id="callClose" title="Свернуть">✕</button>
@@ -928,6 +983,8 @@
     <video id="screenVideo" autoplay playsinline muted></video>
     <div class="screen-cap" id="screenCap"></div>
   </div>
+  <div class="screen-split hidden" id="screenSplit"></div>
+  <div class="screen-tiles hidden" id="screenTiles"></div>
   <div class="call-grid" id="callGrid"></div>
 </div>
 <div class="modal-back hidden" id="screenModal">
@@ -1050,7 +1107,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.8.2';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -1098,6 +1155,7 @@ const store = {
   screenStream: null,
   screenOn: false,
   screenFps: 30,
+  screenFocus: null,
   screenSender: '',
   voiceLimit: 8,
   callHidden: false,
@@ -4466,7 +4524,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.8.1.apk');
+  apkLink.setAttribute('download', 'Arc-1.8.2.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';
@@ -6294,6 +6352,119 @@ function stopScreen(fromTrack) {
   if (!fromTrack) toast('Показ экрана остановлен');
 }
 
+// ============================================================ экраны звонка
+// Два режима:
+//   split  — все демонстрации видны одновременно, поровну (два экрана рядом);
+//   focus  — выбранный экран большой, остальные мини-превью под ним.
+// Клик по экрану в split увеличивает его, клик по большому (или «Все экраны»)
+// возвращает к двум экранам.
+function screenLabel(one) {
+  return one.key === 'me' ? 'Ваш экран' : one.label;
+}
+
+function renderScreenArea(sources, refs) {
+  const { stageBox, video, cap, splitBox, tilesBox } = refs;
+  const keys = sources.map((one) => one.key);
+  // Фокус держим, только пока такой экран в эфире; иначе — снова общий вид.
+  if (store.screenFocus && !keys.includes(store.screenFocus)) store.screenFocus = null;
+  if (!sources.length) {
+    if (stageBox) stageBox.classList.add('hidden');
+    if (splitBox) splitBox.classList.add('hidden');
+    if (tilesBox) tilesBox.classList.add('hidden');
+    if (video) video.srcObject = null;
+    return;
+  }
+  // Один экран — он всегда большой, никаких переключателей.
+  const single = sources.length === 1;
+  const focus = single ? sources[0].key : store.screenFocus;
+  const focused = sources.find((one) => one.key === focus) || null;
+  const split = !single && !focus;
+
+  if (stageBox) stageBox.classList.toggle('hidden', !focused);
+  if (splitBox) splitBox.classList.toggle('hidden', !split);
+
+  if (focused && stageBox && video) {
+    if (video.srcObject !== focused.stream) video.srcObject = focused.stream;
+    if (cap) cap.textContent = screenLabel(focused) + (single ? '' : ' · клик, чтобы показать все');
+    stageBox.onclick = () => {
+      if (sources.length < 2) return;
+      store.screenFocus = null;
+      renderCall();
+    };
+    stageBox.style.cursor = sources.length > 1 ? 'zoom-out' : 'default';
+  }
+
+  // Общий вид: каждый экран в своей ячейке, клик — увеличить.
+  if (splitBox && split) {
+    splitBox.innerHTML = '';
+    splitBox.dataset.count = String(sources.length);
+    for (const one of sources) {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'screen-cell';
+      cell.title = screenLabel(one) + ' — нажмите, чтобы увеличить';
+      const cellVideo = document.createElement('video');
+      cellVideo.autoplay = true;
+      cellVideo.playsInline = true;
+      cellVideo.muted = true;
+      cellVideo.srcObject = one.stream;
+      cell.appendChild(cellVideo);
+      cell.appendChild(el('span', 'scr-cell-name', screenLabel(one)));
+      cell.onclick = () => {
+        store.screenFocus = one.key;
+        renderCall();
+      };
+      splitBox.appendChild(cell);
+    }
+  }
+
+  // В режиме фокуса снизу — превью остальных экранов для быстрого переключения.
+  if (tilesBox) {
+    tilesBox.innerHTML = '';
+    const show = !!focused && sources.length > 1;
+    tilesBox.classList.toggle('hidden', !show);
+    if (show) {
+      for (const one of sources) {
+        const tile = document.createElement('button');
+        tile.type = 'button';
+        tile.className = 'scr-tile' + (one.key === focus ? ' active' : '');
+        tile.title = screenLabel(one);
+        const mini = document.createElement('video');
+        mini.autoplay = true;
+        mini.playsInline = true;
+        mini.muted = true;
+        mini.srcObject = one.stream;
+        tile.appendChild(mini);
+        tile.appendChild(el('span', 'scr-tile-name', screenLabel(one)));
+        tile.onclick = () => {
+          store.screenFocus = one.key;
+          renderCall();
+        };
+        tilesBox.appendChild(tile);
+      }
+      const all = document.createElement('button');
+      all.type = 'button';
+      all.className = 'scr-tile scr-tile-all';
+      all.title = 'Показать все экраны вместе';
+      all.appendChild(el('span', 'scr-tile-name', 'Все экраны'));
+      all.onclick = () => {
+        store.screenFocus = null;
+        renderCall();
+      };
+      tilesBox.appendChild(all);
+    }
+  }
+
+  const allBtn = $('callAllScreens');
+  if (allBtn) {
+    allBtn.classList.toggle('hidden', !focused || sources.length < 2);
+    allBtn.onclick = () => {
+      store.screenFocus = null;
+      renderCall();
+    };
+  }
+}
+
 function renderCall() {
   const stage = $('callStage');
   if (!stage || stage.classList.contains('hidden')) return;
@@ -6312,28 +6483,24 @@ function renderCall() {
   const count = $('callCount');
   if (count) count.textContent = users.length + ' из ' + limit;
 
-  // Большая сцена - экран того, кто показывает.
-  const sharer = users.find((u) => u.screen && !(store.me && u.name === store.me.name));
+  // Все источники экрана: свой + экраны участников, которые показывают.
   const stageBox = $('screenStage');
   const video = $('screenVideo');
   const cap = $('screenCap');
+  const splitBox = $('screenSplit');
+  const tilesBox = $('screenTiles');
   const myShare = store.screenOn && store.screenStream;
-  if (stageBox && video) {
-    const peer = sharer ? store.peers.get(sharer.name) : null;
+  const sources = [];
+  if (myShare) sources.push({ key: 'me', name: store.me && store.me.name, label: 'Ваш экран', stream: store.screenStream });
+  for (const u of users) {
+    if (!u.screen) continue;
+    if (store.me && u.name === store.me.name) continue;
+    const peer = store.peers.get(u.name);
     const remote = peer && peer.screenStream;
-    if (myShare) {
-      stageBox.classList.remove('hidden');
-      if (video.srcObject !== store.screenStream) video.srcObject = store.screenStream;
-      if (cap) cap.textContent = 'Ваш экран';
-    } else if (remote) {
-      stageBox.classList.remove('hidden');
-      if (video.srcObject !== remote) video.srcObject = remote;
-      if (cap) cap.textContent = sharer.name + ' показывает экран';
-    } else {
-      stageBox.classList.add('hidden');
-      video.srcObject = null;
-    }
+    if (!remote) continue;
+    sources.push({ key: u.name, name: u.name, label: displayNameOf(u.name) + ' показывает экран', stream: remote });
   }
+  renderScreenArea(sources, { stageBox, video, cap, splitBox, tilesBox });
 
   const grid = $('callGrid');
   if (!grid) return;

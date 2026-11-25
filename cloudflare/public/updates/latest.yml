@@ -1,8 +1,8 @@
-version: 1.8.1
+version: 1.8.2
 files:
-  - url: Arc-Setup-1.8.1.exe
-    sha512: OEiBWh8lvtZEYupFhTn/V5UJTwq1dR30LeTs2KMLXT45Dm7jcfJbOwkwLmX+IsfEckCfMRULKNFFnhTpt3nLhQ==
-    size: 121656692
-path: Arc-Setup-1.8.1.exe
-sha512: OEiBWh8lvtZEYupFhTn/V5UJTwq1dR30LeTs2KMLXT45Dm7jcfJbOwkwLmX+IsfEckCfMRULKNFFnhTpt3nLhQ==
-releaseDate: '2026-11-24T15:26:26.805Z'
+  - url: Arc-Setup-1.8.2.exe
+    sha512: mtbGeJTGrIsokEUngnNK6YGaq8LwIuGwKHKnacmTWKvR6cJ/nI58mZhUBxQaf7F8noProNq5Hn/aGmjBrRIRrA==
+    size: 121656764
+path: Arc-Setup-1.8.2.exe
+sha512: mtbGeJTGrIsokEUngnNK6YGaq8LwIuGwKHKnacmTWKvR6cJ/nI58mZhUBxQaf7F8noProNq5Hn/aGmjBrRIRrA==
+releaseDate: '2026-11-24T18:46:04.691Z'

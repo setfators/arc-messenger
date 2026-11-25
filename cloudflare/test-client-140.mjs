@@ -74,11 +74,11 @@ function check(name, cond, extra) {
 
 await sleep(150);
 const ws = sockets[0];
-check('версия клиента 1.8.1', window.APP_VERSION === '1.8.1' || $('body').textContent.includes('1.8.1'), 'APP_VERSION');
+check('версия клиента 1.8.2', window.APP_VERSION === '1.8.2' || $('body').textContent.includes('1.8.2'), 'APP_VERSION');
 ws.open();
 
 ws.push({
-  t: 'hello', version: '1.8.1', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
+  t: 'hello', version: '1.8.2', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
   me: { name: 'anna', color: '#5865f2', profile: { displayName: 'Анна', avatarUrl: '' }, status: 'online', settings: { status: 'online' } },
   channels: ['obshiy'],
   channelItems: [{ room: 'obshiy', title: 'obshiy', owner: 'anna', ownerKey: 'anna', mine: true, count: 1, members: [{ name: 'anna', displayName: 'Анна', online: true }] }],
@@ -118,6 +118,18 @@ await sleep(40);
 const reactionChips = [...doc.querySelectorAll('#messages .rx')];
 check('чипы реакций отрисованы', reactionChips.length > 0, 'chips=' + reactionChips.length);
 check('в чипе видно количество', reactionChips.some((c) => (c.textContent || '').includes('2')), reactionChips.map((c) => c.textContent).join('|'));
+
+// --- окно звонка и область экранов ---------------------------------------
+if (window.showCall) {
+  window.showCall();
+  await sleep(60);
+  check('окно звонка открывается', !$('#callStage').classList.contains('hidden'), $('#callStage') ? $('#callStage').className : '');
+  check('без демонстрации область экранов скрыта', $('#screenStage').classList.contains('hidden') && $('#screenSplit').classList.contains('hidden'),
+    $('#screenStage').className + ' / ' + $('#screenSplit').className);
+  check('кнопка «Все экраны» скрыта без фокуса', $('#callAllScreens').classList.contains('hidden'), $('#callAllScreens').className);
+  if (window.hideCall) window.hideCall();
+  await sleep(30);
+}
 
 // --- горячие клавиши ------------------------------------------------------
 doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true }));

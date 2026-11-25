@@ -27,6 +27,11 @@ for (const [name, html] of [['сайт', web], ['APK', mobile]]) {
   check(name + ': кнопка установки приложения', html.includes('beforeinstallprompt'), '');
   check(name + ': смена экрана на лету', html.includes('function switchScreen') && html.includes('replaceTrack'), '');
   check(name + ': кнопки «Сменить экран»', html.includes("id=\"switchScreen\"") && html.includes("id=\"callSwitch\""), '');
+  check(name + ': галерея экранов в звонке', html.includes('id="screenTiles"') && html.includes('store.screenFocus'), '');
+  check(name + ': два экрана рядом (split)', html.includes('id="screenSplit"') && html.includes('function renderScreenArea') && html.includes('screen-cell'), '');
+  check(name + ': возврат ко всем экранам', html.includes('id="callAllScreens"') && html.includes("'Все экраны'"), '');
+  check(name + ': адаптив двух экранов', html.includes('grid-template-rows: 1fr 1fr'), '');
+  check(name + ': мини-превью экранов', html.includes('scr-tile') && html.includes('scr-tile-name'), '');
   check(name + ': адаптивная вёрстка', html.includes('100dvh') && html.includes('safe-area-inset') && html.includes('@media (max-width: 480px)'), '');
   check(name + ': пересчёт размеров окна', html.includes('function syncViewport') && html.includes("addEventListener('orientationchange'"), '');
   check(name + ': мета вьюпорта для клавиатуры', html.includes('interactive-widget=resizes-content'), '');

@@ -15,7 +15,9 @@ check('ссылка-приглашение в канале', page.includes('chan
 check('демонстрация экрана до 60 кадров', page.includes('screenFpsValue') && page.includes('60 кадров · плавно'));
 check('смена экрана на лету', page.includes('function switchScreen') && page.includes('replaceTrack'));
 check('адаптивная вёрстка', page.includes('100dvh') && page.includes('safe-area-inset') && page.includes('function syncViewport'));
-check('версия клиента 1.8.1', page.includes("APP_VERSION = '1.8.1'"));
+check('галерея экранов в звонке', page.includes('screenTiles') && page.includes('function renderScreenArea') && page.includes('store.screenFocus'));
+check('два экрана рядом и возврат', page.includes('id="screenSplit"') && page.includes('id="callAllScreens"') && page.includes('screen-cell'));
+check('версия клиента 1.8.2', page.includes("APP_VERSION = '1.8.2'"));
 check('каналы приватные: замок и число участников', page.includes("'lock', '🔒'") && page.includes("'cnt'"));
 check('удаление общего канала не блокируется', !page.includes('Общий канал удалить нельзя'));
 check('звонки в личке на месте', page.includes('startDmCall') && page.includes('callBox'));
