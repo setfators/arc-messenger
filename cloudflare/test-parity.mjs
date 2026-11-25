@@ -336,6 +336,13 @@ const statusChanged = await waitNew(sws, statusFromOthers, (m) => m.t === 'profi
   && m.profile.statusText === 'На связи ' + stamp);
 check('статус приходит другим как profile_changed', !!statusChanged, '');
 
+// --- 10b. Тема AMOLED не должна откатываться сервером к тёмной.
+const amoledFrom = ows.got.length;
+send(ows, { t: 'settings_update', settings: { theme: 'amoled' } });
+const amoledReply = await waitNew(ows, amoledFrom, (m) => m.t === 'settings' && m.settings && m.settings.theme === 'amoled');
+check('тема AMOLED сохраняется на сервере', !!amoledReply, JSON.stringify(amoledReply && amoledReply.settings && amoledReply.settings.theme));
+send(ows, { t: 'settings_update', settings: { theme: 'dark' } });
+
 // --- 11. Категории каналов.
 from = mark(gws);
 send(gws, { t: 'cat_add', name: 'Работа' });

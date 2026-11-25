@@ -111,7 +111,7 @@ const enc = new TextEncoder();
 // между устройствами вместе с аккаунтом.
 function defaultSettings() {
   return {
-    theme: 'dark',        // dark | light | midnight
+    theme: 'dark',        // dark | light | midnight | amoled
     fontScale: 100,       // 85..130
     compact: false,
     showTime: true,
@@ -165,7 +165,7 @@ function mergeSettings(base, patch) {
     if (!Number.isFinite(n)) return fallback;
     return Math.min(max, Math.max(min, Math.round(n)));
   };
-  if (['dark', 'light', 'midnight'].includes(patch.theme)) out.theme = patch.theme;
+  if (['dark', 'light', 'midnight', 'amoled'].includes(patch.theme)) out.theme = patch.theme;
   if (patch.fontScale !== undefined) out.fontScale = num(patch.fontScale, 85, 130, out.fontScale);
   if (patch.voiceVolume !== undefined) out.voiceVolume = num(patch.voiceVolume, 0, 200, out.voiceVolume);
   if (patch.micGain !== undefined) out.micGain = num(patch.micGain, 0, 200, out.micGain);

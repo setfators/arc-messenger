@@ -1670,6 +1670,35 @@
   html[data-theme="light"] .msg.mentions-me { background: rgba(109,106,252,.08); }
   .search-filters { color: var(--muted); font-size: 11.5px; padding: 2px 6px 8px; }
   .hit-kind { font-size: 11px; }
+
+  /* AMOLED: настоящий чёрный без фиолетового свечения — экономит батарею
+     на OLED-экранах и выглядит как отдельная тема, а не «чуть темнее». */
+  html[data-theme="amoled"] body {
+    background: #000000;
+  }
+  html[data-theme="amoled"] .rail {
+    background: #000000;
+    border-right-color: rgba(255,255,255,.06);
+  }
+  html[data-theme="amoled"] .side {
+    background: #050507;
+  }
+  html[data-theme="amoled"] .topbar {
+    background: rgba(0,0,0,.86);
+  }
+  html[data-theme="amoled"] .auth {
+    background: #000000;
+  }
+  html[data-theme="amoled"] .settings,
+  html[data-theme="amoled"] .settings-nav {
+    background: #050507;
+  }
+  html[data-theme="amoled"] .composer {
+    background: #0d0d12;
+  }
+  html[data-theme="amoled"] .modal-back {
+    background: rgba(0,0,0,.78);
+  }
 </style>
 </head>
 <body>
@@ -3519,7 +3548,12 @@ function handle(data) {
     case 'invite_list': {
       store.invites = Array.isArray(data.invites) ? data.invites : [];
       if (data.inviteOnly !== undefined) store.inviteOnly = !!data.inviteOnly;
-      if (settingsOpen() && currentTab === 'manage') renderSettings('manage');
+      // Обновляем только список кодов: полный перерендер вкладки снова просил бы
+      // invite_list и крутил бесконечный цикл (вкладка «Управление» мигала пустой).
+      if (settingsOpen() && currentTab === 'manage') {
+        const list = $('inviteList');
+        if (list) renderInvites(list);
+      }
       break;
     }
     case 'export_ready': {
@@ -8430,22 +8464,19 @@ function tabManage(body) {
 }
 
 /* --------------------------------------------------- модерация (сотрудники) */
-function tabModeration(body) {
-  body.appendChild(headBlock('Модерация', 'Сотрудники могут удалять любые сообщения и выдавать мьют. Бан и назначение сотрудников — только владелец.'));
-  if (!store.isStaff) {
-    body.appendChild(el('p', 'hint', 'Этот раздел доступен владельцу и сотрудникам.'));
-    return;
-  }
-
-  // 1. Состав команды.
-  const team = el('div', 'sect');
-  team.appendChild(el('h4', '', 'Команда'));
+/* Состав команды: отдельная функция, чтобы обновлять его на месте.
+   Раньше ответ staff_list перерисовывал всю вкладку, та снова просила staff_list
+   и вкладка «Модерация» мигала пустой из-за бесконечного цикла. */
+function fillTeam(container) {
+  if (!container) return;
+  container.innerHTML = '';
+  container.appendChild(el('h4', '', 'Команда'));
   const owner = store.staff.owner;
   if (owner) {
     const row = el('div', 'invite-row');
     row.appendChild(el('span', 'invite-code', '★'));
     row.appendChild(el('span', 'invite-info', owner.displayName + ' — владелец'));
-    team.appendChild(row);
+    container.appendChild(row);
   }
   for (const person of store.staff.staff || []) {
     const row = el('div', 'invite-row');
@@ -8457,13 +8488,26 @@ function tabModeration(body) {
       off.onclick = () => send({ t: 'staff_remove', name: person.name });
       row.appendChild(off);
     }
-    team.appendChild(row);
+    container.appendChild(row);
   }
   if (!(store.staff.staff || []).length) {
-    team.appendChild(el('p', 'hint', store.isOwner
+    container.appendChild(el('p', 'hint', store.isOwner
       ? 'Сотрудников пока нет. Назначьте человека по имени ниже.'
       : 'Кроме владельца сотрудников нет.'));
   }
+}
+
+function tabModeration(body) {
+  body.appendChild(headBlock('Модерация', 'Сотрудники могут удалять любые сообщения и выдавать мьют. Бан и назначение сотрудников — только владелец.'));
+  if (!store.isStaff) {
+    body.appendChild(el('p', 'hint', 'Этот раздел доступен владельцу и сотрудникам.'));
+    return;
+  }
+
+  // 1. Состав команды (обновляется на месте, без перерисовки вкладки).
+  const team = el('div', 'sect');
+  team.id = 'modTeam';
+  fillTeam(team);
   body.appendChild(team);
 
   // 2. Управление людьми.
@@ -8714,7 +8758,9 @@ function renderBackups(container) {
 }
 
 function renderStaff() {
-  if (settingsOpen() && currentTab === 'moderation') renderSettings('moderation');
+  if (!settingsOpen() || currentTab !== 'moderation') return;
+  const box = $('modTeam');
+  if (box) fillTeam(box);
 }
 
 function renderInvites(container) {

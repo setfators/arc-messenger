@@ -308,6 +308,43 @@ try {
   })()`);
   await sleep(200);
   check('тёмная тема возвращается', (await evaluate("document.documentElement.dataset.theme")) === 'dark');
+  // 9.55. AMOLED: тема действительно чёрная.
+  await evaluate(`(() => {
+    const chip = [...document.querySelectorAll('#settingsBody .chip')].find((c) => c.textContent.includes('AMOLED'));
+    if (chip) chip.click();
+    return !!chip;
+  })()`);
+  check('тема AMOLED применяется', await waitFor("document.documentElement.dataset.theme === 'amoled'"));
+  await sleep(400);
+  const amoled = await evaluate(`(() => ({
+    bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
+    bodyBg: getComputedStyle(document.body).backgroundColor,
+    bodyImage: getComputedStyle(document.body).backgroundImage,
+  }))()`);
+  check('AMOLED: фон реально чёрный', !!(amoled && amoled.bg === '#000000' && amoled.bodyBg === 'rgb(0, 0, 0)' && amoled.bodyImage === 'none'), JSON.stringify(amoled));
+
+  // 9.56. «Управление» и «Модерация»: содержимое видно и не мигает пустым.
+  await evaluate("document.querySelector('.settings-nav button[data-tab=\"manage\"]').click()");
+  const manageOk = await waitFor(`(() => {
+    const b = document.querySelector('#settingsBody');
+    return !!b && b.textContent.includes('Статистика') && Number(getComputedStyle(b).opacity) > 0.9;
+  })()`);
+  await sleep(1200);
+  const manageAfter = await evaluate(`(() => { const b = document.querySelector('#settingsBody'); return { opacity: getComputedStyle(b).opacity, text: b.textContent.includes('Статистика'), len: b.textContent.length }; })()`);
+  check('вкладка «Управление» показывает содержимое', !!(manageOk && manageAfter && manageAfter.opacity === '1' && manageAfter.text), JSON.stringify(manageAfter));
+  await evaluate("document.querySelector('.settings-nav button[data-tab=\"moderation\"]').click()");
+  const moderationOk = await waitFor(`(() => {
+    const b = document.querySelector('#settingsBody');
+    return !!b && b.textContent.includes('Команда') && Number(getComputedStyle(b).opacity) > 0.9;
+  })()`);
+  await sleep(1200);
+  const moderationAfter = await evaluate(`(() => { const b = document.querySelector('#settingsBody'); return { opacity: getComputedStyle(b).opacity, text: b.textContent.includes('Команда'), len: b.textContent.length }; })()`);
+  check('вкладка «Модерация» показывает содержимое', !!(moderationOk && moderationAfter && moderationAfter.opacity === '1' && moderationAfter.text), JSON.stringify(moderationAfter));
+  // Возвращаем тёмную тему и закрываем настройки.
+  await evaluate("document.querySelector('.settings-nav button[data-tab=\"appearance\"]').click()");
+  await sleep(200);
+  await evaluate(`(() => { const chip = [...document.querySelectorAll('#settingsBody .chip')].find((c) => c.textContent.trim() === 'Тёмная'); if (chip) chip.click(); return true; })()`);
+  await sleep(300);
   await evaluate("document.querySelector('#settingsClose').click()");
   await sleep(150);
 
