@@ -1,7 +1,7 @@
 {
   "name": "messenger-desktop",
   "productName": "Arc",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "Arc — десктопное приложение",
   "main": "main.js",
   "author": "setfators",
@@ -9,6 +9,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
+    "test:overlay": "electron . --overlay-test",
     "build": "electron-builder --win nsis"
   },
   "devDependencies": {
@@ -25,6 +26,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "overlay.html",
+      "overlay-preload.js",
       "error.html",
       "icon.ico",
       "node_modules/electron-updater/**/*",

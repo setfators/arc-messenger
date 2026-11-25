@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;">
+<title>Arc Overlay</title>
+<style>
+  :root {
+    --bg: rgba(18, 20, 26, .94);
+    --line: rgba(255, 255, 255, .09);
+    --text: #e8eaed;
+    --muted: #9aa0ab;
+    --accent: #5865f2;
+    --ok: #3ba55d;
+    --danger: #ed4245;
+    --ease: cubic-bezier(.16, 1, .3, 1);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body {
+    font: 13px/1.4 "Segoe UI", Roboto, Arial, sans-serif;
+    color: var(--text);
+    /* Вся страница прозрачна и не ловит мышь: клики уходят в игру. */
+    -webkit-user-select: none; user-select: none;
+    pointer-events: none;
+  }
+  body.interactive #ovPanel { pointer-events: auto; }
+
+  /* ---------- панель звонка ---------- */
+  #ovPanel {
+    position: fixed; left: 18px; top: 18px; width: 296px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: 0 18px 42px rgba(0, 0, 0, .55);
+    backdrop-filter: blur(10px);
+    padding: 12px 14px 10px;
+    opacity: 1; transform: none;
+    transition: opacity 220ms var(--ease), transform 220ms var(--ease);
+    pointer-events: none;
+  }
+  #ovPanel.ov-hidden { opacity: 0; transform: translateY(-10px) scale(.97); }
+  body.interactive #ovPanel {
+    border-color: var(--accent);
+    box-shadow: 0 18px 42px rgba(0, 0, 0, .55), 0 0 0 1px var(--accent);
+  }
+
+  .ov-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .ov-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--ok);
+    box-shadow: 0 0 0 0 rgba(59, 165, 93, .5);
+    animation: ovPulse 2.2s ease-in-out infinite;
+  }
+  #ovPanel.ov-hidden .ov-dot { animation: none; }
+  @keyframes ovPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(59, 165, 93, .45); }
+    50% { box-shadow: 0 0 0 5px rgba(59, 165, 93, 0); }
+  }
+  .ov-title {
+    flex: 1; min-width: 0; font-weight: 600; font-size: 13px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ov-mode {
+    font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--line); border-radius: 6px;
+    padding: 1px 6px; opacity: 0; transition: opacity 160ms var(--ease);
+  }
+  body.interactive .ov-mode { opacity: 1; color: #b5baff; border-color: rgba(88,101,242,.55); }
+
+  /* ---------- участники ---------- */
+  .ov-list { display: flex; flex-direction: column; gap: 4px; }
+  .ov-row {
+    display: flex; align-items: center; gap: 9px;
+    padding: 3px 4px; border-radius: 8px;
+    transition: background 140ms var(--ease);
+  }
+  .ov-ava {
+    width: 26px; height: 26px; border-radius: 50%; flex: 0 0 26px;
+    display: grid; place-items: center;
+    font-size: 12px; font-weight: 700; color: #fff;
+    background: linear-gradient(135deg, #5865f2, #8b5cf6);
+    box-shadow: 0 0 0 0 rgba(59, 165, 93, 0);
+    transition: box-shadow 160ms var(--ease);
+  }
+  .ov-row.speaking .ov-ava { box-shadow: 0 0 0 3px rgba(59, 165, 93, .85); }
+  .ov-row.muted .ov-ava { filter: grayscale(.7); opacity: .75; }
+  .ov-name {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ov-row.muted .ov-name { color: var(--muted); }
+  .ov-tag {
+    font-size: 10px; color: var(--muted); border: 1px solid var(--line);
+    border-radius: 5px; padding: 0 5px; line-height: 15px;
+  }
+  .ov-ic { width: 14px; height: 14px; flex: 0 0 14px; opacity: .8; }
+  .ov-ic.mute { color: var(--danger); opacity: 1; }
+
+  /* ---------- подвал ---------- */
+  .ov-foot {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line);
+  }
+  .ov-mic {
+    display: none; font: inherit; font-size: 12px; cursor: pointer;
+    background: rgba(255, 255, 255, .07); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px;
+    transition: background 140ms var(--ease), border-color 140ms var(--ease);
+  }
+  body.interactive .ov-mic { display: inline-block; }
+  .ov-mic:hover { border-color: var(--accent); }
+  .ov-mic.off { color: #ffb3b5; border-color: rgba(237, 66, 69, .55); }
+  .ov-hint {
+    flex: 1; min-width: 0; font-size: 10.5px; color: var(--muted);
+    text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* ---------- всплывающие сообщения ---------- */
+  #ovToasts {
+    position: fixed; right: 18px; top: 18px; width: 300px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .ov-toast {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, .5);
+    backdrop-filter: blur(10px);
+    padding: 9px 12px;
+    animation: ovToastIn 260ms var(--ease);
+    border-left: 3px solid var(--accent);
+  }
+  .ov-toast.out { animation: ovToastOut 200ms var(--ease) forwards; }
+  @keyframes ovToastIn { from { opacity: 0; transform: translateX(16px) } to { opacity: 1; transform: none } }
+  @keyframes ovToastOut { from { opacity: 1; transform: none } to { opacity: 0; transform: translateX(16px) } }
+  .ov-toast-head {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+    font-size: 11px; color: var(--muted);
+  }
+  .ov-toast-app {
+    font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
+    color: #b5baff; border: 1px solid rgba(88, 101, 242, .45);
+    border-radius: 5px; padding: 0 5px; line-height: 14px;
+  }
+  .ov-toast-author { color: var(--text); font-weight: 600; }
+  .ov-toast-text {
+    font-size: 12.5px; color: #d6d9de;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+  <div id="ovPanel" class="ov-hidden" aria-live="polite">
+    <div class="ov-head">
+      <span class="ov-dot"></span>
+      <span class="ov-title" id="ovTitle">Голосовой канал</span>
+      <span class="ov-mode">мышь</span>
+    </div>
+    <div class="ov-list" id="ovList"></div>
+    <div class="ov-foot">
+      <button class="ov-mic" id="ovMic" type="button">Микрофон</button>
+      <span class="ov-hint" id="ovHint"></span>
+    </div>
+  </div>
+  <div id="ovToasts"></div>
+<script>
+  (function () {
+    const api = window.arcOverlay || null;
+    const panel = document.getElementById('ovPanel');
+    const list = document.getElementById('ovList');
+    const title = document.getElementById('ovTitle');
+    const hint = document.getElementById('ovHint');
+    const micBtn = document.getElementById('ovMic');
+    const toasts = document.getElementById('ovToasts');
+    let selfMuted = false;
+
+    const MIC_ON = '<svg class="ov-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+    const MIC_OFF = '<svg class="ov-ic mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M3 3l18 18"/></svg>';
+
+    function initial(name) {
+      const clean = String(name || '?').replace(/^@/, '').trim();
+      return clean ? clean[0].toUpperCase() : '?';
+    }
+
+    function renderState(state) {
+      const data = state || {};
+      const people = Array.isArray(data.participants) ? data.participants : [];
+      selfMuted = !!data.selfMuted;
+      panel.classList.toggle('ov-hidden', !data.inCall);
+      title.textContent = data.inCall ? (data.title || 'Голосовой канал') : '';
+      if (!data.inCall) {
+        list.textContent = '';
+        return;
+      }
+      const signature = people.map((one) => one.name + '|' + one.muted + '|' + one.screen).join(';');
+      if (list.dataset.sig !== signature) {
+        list.dataset.sig = signature;
+        list.textContent = '';
+        for (const one of people) {
+          const row = document.createElement('div');
+          row.className = 'ov-row' + (one.muted ? ' muted' : ' speaking');
+          const ava = document.createElement('span');
+          ava.className = 'ov-ava';
+          ava.textContent = initial(one.name);
+          const nm = document.createElement('span');
+          nm.className = 'ov-name';
+          nm.textContent = one.name || '';
+          row.append(ava, nm);
+          if (one.screen) {
+            const tag = document.createElement('span');
+            tag.className = 'ov-tag';
+            tag.textContent = 'экран';
+            row.appendChild(tag);
+          }
+          const icon = document.createElement('span');
+          icon.innerHTML = one.muted ? MIC_OFF : MIC_ON;
+          row.appendChild(icon.firstChild || document.createElement('span'));
+          list.appendChild(row);
+        }
+      }
+      micBtn.classList.toggle('off', selfMuted);
+      micBtn.textContent = selfMuted ? 'Включить микрофон' : 'Выключить микрофон';
+      hint.textContent = 'Shift+` — скрыть';
+    }
+
+    function renderToast(payload) {
+      const data = payload || {};
+      const box = document.createElement('div');
+      box.className = 'ov-toast';
+      const head = document.createElement('div');
+      head.className = 'ov-toast-head';
+      const app = document.createElement('span');
+      app.className = 'ov-toast-app';
+      app.textContent = 'Arc';
+      const author = document.createElement('span');
+      author.className = 'ov-toast-author';
+      author.textContent = data.author || '';
+      head.append(app, author);
+      const text = document.createElement('div');
+      text.className = 'ov-toast-text';
+      text.textContent = data.text || '';
+      box.append(head, text);
+      toasts.appendChild(box);
+      while (toasts.children.length > 3) toasts.removeChild(toasts.firstChild);
+      setTimeout(() => {
+        box.classList.add('out');
+        setTimeout(() => box.remove(), 240);
+      }, Math.max(2500, Number(data.duration) || 5000));
+    }
+
+    function setInteractive(on) {
+      document.body.classList.toggle('interactive', !!on);
+      hint.textContent = on ? 'Esc — выйти из режима мыши' : 'Shift+` — скрыть';
+    }
+
+    if (api) {
+      api.onState(renderState);
+      api.onToast(renderToast);
+      api.onMode(setInteractive);
+      api.ready();
+    }
+    micBtn.addEventListener('click', () => { if (api) api.toggleMic(); });
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && api) api.exitInteractive();
+    });
+  })();
+</script>
+</body>
+</html>

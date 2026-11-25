@@ -19,6 +19,8 @@ class FakeWS {
   push(obj) { if (this.onmessage) this.onmessage({ data: JSON.stringify(obj) }); }
 }
 
+const overlayCalls = [];
+
 const dom = new JSDOM(html, {
   url: 'https://example.test/',
   runScripts: 'dangerously',
@@ -37,6 +39,16 @@ const dom = new JSDOM(html, {
     window.prompt = () => null;
     window.alert = () => {};
     window.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
+    // Мост десктоп-оболочки: оверлей поверх игр (1.11.0).
+    window.messengerDesktop = {
+      isDesktop: true,
+      overlaySupported: true,
+      overlayToggle: () => overlayCalls.push('toggle'),
+      overlayGet: () => { overlayCalls.push('get'); return Promise.resolve({ enabled: false, interactive: false, keys: 'Shift+` — скрыть/показать · Ctrl+Shift+O — режим мыши' }); },
+      overlaySet: (patch) => { overlayCalls.push('set:' + JSON.stringify(patch)); return Promise.resolve({ enabled: !!(patch && patch.enabled), interactive: !!(patch && patch.interactive) }); },
+      setBadge: () => {},
+      onUpdate: () => () => {}
+    };
     window.RTCPeerConnection = class {
       constructor() { this.connectionState = 'new'; }
       addTrack() {} createDataChannel() { return {}; }
@@ -74,11 +86,11 @@ function check(name, cond, extra) {
 
 await sleep(150);
 const ws = sockets[0];
-check('версия клиента 1.10.0', window.APP_VERSION === '1.10.0' || $('body').textContent.includes('1.10.0'), 'APP_VERSION');
+check('версия клиента 1.11.0', window.APP_VERSION === '1.11.0' || $('body').textContent.includes('1.11.0'), 'APP_VERSION');
 ws.open();
 
 ws.push({
-  t: 'hello', version: '1.10.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
+  t: 'hello', version: '1.11.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
   me: { name: 'anna', color: '#5865f2', profile: { displayName: 'Анна', avatarUrl: '' }, status: 'online', settings: { status: 'online' } },
   channels: ['obshiy'],
   channelItems: [{ room: 'obshiy', title: 'obshiy', owner: 'anna', ownerKey: 'anna', mine: true, count: 1, members: [{ name: 'anna', displayName: 'Анна', online: true }] }],
@@ -267,6 +279,27 @@ if (voiceTabBtn) {
     check('режим «нажми и говори» уходит на сервер', !!pttSent, JSON.stringify(ws.sent.filter((m) => m.t === 'settings_update').slice(-2)));
   }
 }
+// --- оверлей в десктоп-оболочке (1.11.0) -----------------------------------
+if (window.messengerDesktop && window.messengerDesktop.overlaySupported) {
+  const voiceTab2 = doc.querySelector('[data-tab="voice"]');
+  if (voiceTab2) {
+    voiceTab2.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await sleep(120);
+    const ovText = ($('#settingsBody') ? $('#settingsBody').textContent : '') || '';
+    check('в настройках есть блок оверлея', ovText.includes('Оверлей поверх игр'), ovText.slice(-200));
+    const ovSwitches = [...doc.querySelectorAll('#settingsBody .switch')];
+    check('переключатель оверлея показан', ovSwitches.length > 0, 'switches=' + ovSwitches.length);
+    check('подсказка про горячие клавиши оверлея', ovText.includes('Shift+`'), ovText.slice(-200));
+    const callsBefore = overlayCalls.length;
+    const ovBtn = [...doc.querySelectorAll('#settingsBody button')].find((b) => (b.textContent || '').includes('Режим мыши'));
+    if (ovBtn) {
+      ovBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+      await sleep(150);
+      check('кнопка режима мыши обращается к оболочке', overlayCalls.length > callsBefore, 'calls=' + overlayCalls.length);
+    }
+  }
+}
+
 // --- вкладка «Бинды»: запись клавиши и боковой кнопки мыши -----------------
 const bindsTabBtn = doc.querySelector('[data-tab="binds"]');
 check('вкладка «Бинды» есть', !!bindsTabBtn, [...doc.querySelectorAll('.settings-nav button')].map((b) => b.textContent).join('|'));
@@ -313,7 +346,7 @@ if (accountTabBtn) {
   accountTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await sleep(60);
   const bodyText = ($('#settingsBody') ? $('#settingsBody').textContent : '') || '';
-  check('в аккаунте видна версия', /1\.10\.\d+/.test(bodyText), bodyText.slice(0, 200));
+  check('в аккаунте видна версия', /1\.11\.\d+/.test(bodyText), bodyText.slice(0, 200));
   const passInputs = [...doc.querySelectorAll('#settingsBody input[type="password"]')];
   check('три поля для смены пароля', passInputs.length >= 3, 'inputs=' + passInputs.length);
   if (passInputs.length >= 3) {

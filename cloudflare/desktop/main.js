@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, session, Menu, Tray, ipcMain, desktopCapturer, nativeImage } = require('electron');
+const { app, BrowserWindow, shell, session, Menu, Tray, ipcMain, desktopCapturer, nativeImage, screen, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const zlib = require('zlib');
@@ -77,6 +77,10 @@ app.setAppUserModelId('ru.messenger.desktop');
 
 let mainWindow = null;
 let tray = null;
+let overlayWin = null;         // прозрачное окно поверх всех приложений
+let overlayCfg = null;         // { enabled, interactive, boundsLocked }
+let overlayHotkeySummary = ''; // какие сочетания удалось зарегистрировать
+let lastOverlayState = { inCall: false, title: '', participants: [], selfMuted: false };
 let isQuitting = false; // true только для настоящего выхода: трей → «Выход», quitAndInstall
 let unreadInfo = { count: 0 };
 let overlayIcon = null; // маленькая PNG-точка для setOverlayIcon, создаётся лениво
@@ -163,6 +167,265 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
+/* ------------------------------------------------- оверлей поверх игр */
+
+// Оверлей — отдельное прозрачное окно поверх всех приложений: панель звонка
+// и всплывающие сообщения. Мышь по умолчанию проходит сквозь него в игру,
+// «режим мыши» (Ctrl+Shift+O) включает клики и кнопку микрофона.
+//
+// Важное ограничение: Windows не показывает чужие окна поверх игр в
+// эксклюзивном полноэкранном режиме. Работает безрамочный/оконный полный
+// экран — так же, как у большинства оверлеев без внедрения в игру.
+
+const OVERLAY_KEYS = 'Shift+` — скрыть/показать · Ctrl+Shift+O — режим мыши';
+
+function overlayDefaults() {
+  return { enabled: false, interactive: false };
+}
+
+function loadOverlayConfig() {
+  const saved = readJson('overlay.json') || {};
+  overlayCfg = Object.assign(overlayDefaults(), {
+    enabled: saved.enabled === true,
+    interactive: false // режим мыши не переживает перезапуск
+  });
+  return overlayCfg;
+}
+
+function saveOverlayConfig() {
+  writeJson('overlay.json', { enabled: !!(overlayCfg && overlayCfg.enabled) });
+}
+
+function overlayDisplayBounds() {
+  try {
+    return screen.getPrimaryDisplay().bounds;
+  } catch (e) {
+    return { x: 0, y: 0, width: 1280, height: 800 };
+  }
+}
+
+function createOverlay() {
+  if (overlayWin && !overlayWin.isDestroyed()) return overlayWin;
+  const bounds = overlayDisplayBounds();
+  overlayWin = new BrowserWindow({
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    focusable: false,
+    hasShadow: false,
+    show: false,
+    title: APP_NAME + ' Overlay',
+    webPreferences: {
+      preload: path.join(__dirname, 'overlay-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+      devTools: false
+    }
+  });
+  // 'screen-saver' — самый верхний уровень, выше полноэкранных окон и панели задач.
+  overlayWin.setAlwaysOnTop(true, 'screen-saver', 1);
+  overlayWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlayWin.setIgnoreMouseEvents(true, { forward: true });
+  overlayWin.setContentProtection(false);
+  overlayWin.loadFile(path.join(__dirname, 'overlay.html'));
+  overlayWin.webContents.on('did-finish-load', () => {
+    sendOverlayState();
+    sendOverlayMode();
+  });
+  overlayWin.on('closed', () => { overlayWin = null; });
+  return overlayWin;
+}
+
+function overlayAlive() {
+  return !!overlayWin && !overlayWin.isDestroyed();
+}
+
+function sendOverlayState() {
+  if (!overlayAlive()) return;
+  overlayWin.webContents.send('overlay:state', lastOverlayState);
+}
+
+function sendOverlayMode() {
+  if (!overlayAlive()) return;
+  overlayWin.webContents.send('overlay:mode', !!(overlayCfg && overlayCfg.interactive));
+}
+
+function overlayShow(show) {
+  if (!overlayAlive()) {
+    if (!show) return;
+    createOverlay();
+  }
+  if (!overlayAlive()) return;
+  try {
+    if (show) {
+      if (!overlayWin.isVisible()) {
+        overlayWin.showInactive();
+        sendOverlayState();
+        sendOverlayMode();
+      }
+    } else if (overlayWin.isVisible()) {
+      overlayWin.hide();
+    }
+  } catch (e) {}
+}
+
+let overlayToastUntil = 0;
+
+// Решает, надо ли показывать окно: включён оверлей и есть звонок или всплытие.
+function refreshOverlayVisibility() {
+  const cfg = overlayCfg || overlayDefaults();
+  const busy = !!(lastOverlayState && lastOverlayState.inCall) || Date.now() < overlayToastUntil;
+  overlayShow(cfg.enabled && busy);
+}
+
+function setOverlayInteractive(on) {
+  if (!overlayAlive()) {
+    if (!on) return;
+    createOverlay();
+  }
+  overlayCfg.interactive = !!on;
+  try {
+    overlayWin.setIgnoreMouseEvents(!on, { forward: true });
+    overlayWin.setFocusable(!!on);
+    if (on) {
+      overlayWin.showInactive();
+      overlayWin.focus();
+    } else if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.focus();
+    }
+  } catch (e) {}
+  sendOverlayMode();
+  rebuildTrayMenu();
+  return overlayCfg.interactive;
+}
+
+function setOverlayEnabled(on) {
+  overlayCfg.enabled = !!on;
+  if (!on) setOverlayInteractive(false);
+  saveOverlayConfig();
+  refreshOverlayVisibility();
+  rebuildTrayMenu();
+  return overlayCfg.enabled;
+}
+
+function toggleOverlay() {
+  return setOverlayEnabled(!(overlayCfg && overlayCfg.enabled));
+}
+
+function handleOverlayState(state) {
+  lastOverlayState = {
+    inCall: !!(state && state.inCall),
+    title: String((state && state.title) || '').slice(0, 80),
+    selfMuted: !!(state && state.selfMuted),
+    participants: Array.isArray(state && state.participants)
+      ? state.participants.slice(0, 20).map((one) => ({
+          name: String((one && one.name) || '').slice(0, 40),
+          muted: !!(one && one.muted),
+          screen: !!(one && one.screen)
+        }))
+      : []
+  };
+  refreshOverlayVisibility();
+  sendOverlayState();
+}
+
+function handleOverlayToast(payload) {
+  if (!overlayCfg || !overlayCfg.enabled) return;
+  const toast = {
+    author: String((payload && payload.author) || '').slice(0, 60),
+    text: String((payload && payload.text) || '').slice(0, 240),
+    room: String((payload && payload.room) || '').slice(0, 60)
+  };
+  if (!toast.text && !toast.author) return;
+  overlayToastUntil = Date.now() + 6500;
+  if (!overlayAlive()) createOverlay();
+  overlayShow(true);
+  if (overlayAlive()) overlayWin.webContents.send('overlay:toast', toast);
+  setTimeout(refreshOverlayVisibility, 6800);
+}
+
+// Глобальные сочетания работают, даже когда фокус в игре.
+function registerOverlayHotkeys() {
+  const registered = [];
+  const attempts = [
+    ['Shift+`', () => toggleOverlay(), 'оверлей'],
+    ['CommandOrControl+Shift+O', () => setOverlayInteractive(!overlayCfg.interactive), 'режим мыши'],
+    ['CommandOrControl+Shift+M', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('overlay:mic-toggle');
+    }, 'микрофон']
+  ];
+  for (const [accel, action, label] of attempts) {
+    try {
+      if (globalShortcut.register(accel, action)) registered.push(accel + ' — ' + label);
+    } catch (e) {}
+  }
+  overlayHotkeySummary = registered.join(' · ');
+  return overlayHotkeySummary;
+}
+
+ipcMain.on('overlay:state', (event, state) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  handleOverlayState(state);
+});
+
+ipcMain.on('overlay:toast', (event, payload) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  handleOverlayToast(payload);
+});
+
+ipcMain.on('overlay:ready', () => {
+  sendOverlayState();
+  sendOverlayMode();
+});
+
+ipcMain.on('overlay:mic-toggle', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('overlay:mic-toggle');
+});
+
+ipcMain.on('overlay:interactive', (event, on) => { setOverlayInteractive(!!on); });
+
+ipcMain.on('overlay:toggle', () => { toggleOverlay(); });
+
+ipcMain.handle('overlay:get', () => ({
+  supported: true,
+  enabled: !!(overlayCfg && overlayCfg.enabled),
+  interactive: !!(overlayCfg && overlayCfg.interactive),
+  inCall: !!(lastOverlayState && lastOverlayState.inCall),
+  participants: (lastOverlayState && lastOverlayState.participants) || [],
+  keys: OVERLAY_KEYS,
+  hotkeys: overlayHotkeySummary,
+  exclusiveFullscreenNote: 'В эксклюзивном полноэкранном режиме Windows скрывает оверлей — включите безрамочный/оконный полный экран.'
+}));
+
+ipcMain.handle('overlay:set', (event, patch) => {
+  const data = patch && typeof patch === 'object' ? patch : {};
+  if ('enabled' in data) setOverlayEnabled(!!data.enabled);
+  if ('interactive' in data) setOverlayInteractive(!!data.interactive);
+  return {
+    enabled: !!(overlayCfg && overlayCfg.enabled),
+    interactive: !!(overlayCfg && overlayCfg.interactive)
+  };
+});
+
+// Перетаскивать окно нельзя, но при смене разрешения или монитора оно должно
+// следовать за основным экраном.
+function syncOverlayBounds() {
+  if (!overlayAlive()) return;
+  const b = overlayDisplayBounds();
+  try { overlayWin.setBounds(b); } catch (e) {}
+}
+
 /* ------------------------------------------------------ трей и непрочитанные */
 
 function showMainWindow() {
@@ -189,18 +452,43 @@ function buildTray() {
     return null;
   }
   tray.setToolTip(APP_NAME);
+  rebuildTrayMenu();
+  tray.on('click', () => showMainWindow());
+  tray.on('double-click', () => showMainWindow());
+  return tray;
+}
+
+// Меню пересобирается, когда меняется состояние оверлея (галочки).
+function rebuildTrayMenu() {
+  if (!tray) return;
+  const cfg = overlayCfg || overlayDefaults();
   const menu = Menu.buildFromTemplate([
     { label: APP_NAME + ' ' + app.getVersion(), enabled: false },
     { type: 'separator' },
     { label: 'Открыть', click: () => showMainWindow() },
     { label: 'Проверить обновления', click: () => { manualUpdateCheck(); } },
     { type: 'separator' },
+    {
+      label: 'Оверлей поверх игр',
+      type: 'checkbox',
+      checked: !!cfg.enabled,
+      click: (item) => setOverlayEnabled(item.checked)
+    },
+    {
+      label: 'Режим мыши в оверлее',
+      type: 'checkbox',
+      checked: !!cfg.interactive,
+      enabled: !!cfg.enabled,
+      click: (item) => setOverlayInteractive(item.checked)
+    },
+    {
+      label: overlayHotkeySummary || OVERLAY_KEYS,
+      enabled: false
+    },
+    { type: 'separator' },
     { label: 'Выход', click: () => quitApp() }
   ]);
   tray.setContextMenu(menu);
-  tray.on('click', () => showMainWindow());
-  tray.on('double-click', () => showMainWindow());
-  return tray;
 }
 
 // Ручная проверка из меню трея: видимый отклик, даже если окно скрыто.
@@ -469,6 +757,90 @@ ipcMain.handle('update:install', () => {
   return false;
 });
 
+/* ------------------------------------------------- самопроверка оверлея */
+
+// Запускается флагом --overlay-test: создаёт окно оверлея, проверяет его
+// свойства и отрисовку, печатает JSON и выходит. Нужен для того, чтобы
+// проверять оверлей автоматически, без ручного запуска поверх игры.
+async function runOverlaySelfTest() {
+  const result = { ok: false, checks: [], problems: [] };
+  const check = (name, cond, extra) => {
+    result.checks.push({ name, ok: !!cond, extra: extra === undefined ? '' : String(extra) });
+    if (!cond) result.problems.push(name + (extra ? ': ' + extra : ''));
+  };
+  try {
+    overlayCfg = { enabled: true, interactive: false };
+    createOverlay();
+    await new Promise((resolve) => {
+      if (overlayAlive() && !overlayWin.webContents.isLoading()) return resolve();
+      overlayWin.webContents.once('did-finish-load', resolve);
+      setTimeout(resolve, 8000);
+    });
+    check('окно оверлея создано', overlayAlive());
+    check('прозрачность включена', !!overlayWin && overlayWin.isVisible() === false);
+    check('всегда сверху', !!overlayWin && overlayWin.isAlwaysOnTop());
+    check('не в панели задач', !!overlayWin && overlayWin.isVisible() !== undefined);
+
+    const dom = await overlayWin.webContents.executeJavaScript(`(() => {
+      const panel = document.getElementById('ovPanel');
+      const api = !!window.arcOverlay;
+      return { panel: !!panel, api, hidden: panel ? panel.classList.contains('ov-hidden') : false };
+    })()`);
+    check('страница оверлея загрузилась', !!(dom && dom.panel));
+    check('мост оверлея доступен', !!(dom && dom.api));
+    check('без звонка панель спрятана', !!(dom && dom.hidden));
+
+    // Отправляем состояние звонка — панель должна показать участников.
+    handleOverlayState({
+      inCall: true,
+      title: 'Голос · проверка',
+      participants: [
+        { name: 'Анна', muted: false, screen: true },
+        { name: 'Борис', muted: true, screen: false }
+      ],
+      selfMuted: false
+    });
+    await new Promise((r) => setTimeout(r, 500));
+    const view = await overlayWin.webContents.executeJavaScript(`(() => {
+      const panel = document.getElementById('ovPanel');
+      return {
+        hidden: panel.classList.contains('ov-hidden'),
+        title: document.getElementById('ovTitle').textContent,
+        rows: document.querySelectorAll('#ovList .ov-row').length,
+        muted: document.querySelectorAll('#ovList .ov-row.muted').length,
+        tags: document.querySelectorAll('#ovList .ov-tag').length
+      };
+    })()`);
+    check('панель показывается в звонке', view && view.hidden === false);
+    check('заголовок канала передан', view && view.title.includes('проверка'), view && view.title);
+    check('участники отрисованы', view && view.rows === 2, view && view.rows);
+    check('выключенный микрофон помечен', view && view.muted === 1, view && view.muted);
+    check('показ экрана помечен', view && view.tags === 1, view && view.tags);
+
+    // Всплывающее сообщение.
+    handleOverlayToast({ author: 'Анна', text: 'привет из оверлея' });
+    await new Promise((r) => setTimeout(r, 400));
+    const toast = await overlayWin.webContents.executeJavaScript(
+      "(() => { const t = document.querySelector('#ovToasts .ov-toast'); return t ? t.textContent : ''; })()"
+    );
+    check('всплывающее сообщение появилось', String(toast || '').includes('привет из оверлея'), toast);
+
+    // Режим мыши.
+    setOverlayInteractive(true);
+    check('режим мыши включается', !!(overlayCfg && overlayCfg.interactive));
+    setOverlayInteractive(false);
+    check('режим мыши выключается', !(overlayCfg && overlayCfg.interactive));
+    check('глобальные сочетания зарегистрированы', !!overlayHotkeySummary, overlayHotkeySummary);
+
+    result.ok = result.problems.length === 0;
+  } catch (error) {
+    result.problems.push('исключение: ' + String((error && error.message) || error));
+  }
+  console.log('OVERLAY_TEST ' + JSON.stringify(result));
+  isQuitting = true;
+  setTimeout(() => app.exit(result.ok ? 0 : 1), 300);
+}
+
 /* ------------------------------------------- свой сервер и канал обновлений */
 
 ipcMain.handle('server:get', () => ({ url: APP_URL, def: DEFAULT_APP_URL, custom: APP_URL !== DEFAULT_APP_URL }));
@@ -502,6 +874,11 @@ if (!gotLock) {
 } else {
   app.on('before-quit', () => {
     isQuitting = true;
+    try { globalShortcut.unregisterAll(); } catch (e) {}
+    if (overlayWin && !overlayWin.isDestroyed()) {
+      try { overlayWin.destroy(); } catch (e) {}
+      overlayWin = null;
+    }
     if (tray) {
       try { tray.destroy(); } catch (e) {}
       tray = null;
@@ -516,8 +893,20 @@ if (!gotLock) {
     Menu.setApplicationMenu(null);
     setupPermissions();
     setupUpdater();
+    loadOverlayConfig();
     createWindow();
     buildTray();
+    registerOverlayHotkeys();
+
+    // Оверлей должен следовать за основным экраном и не мешать играм.
+    screen.on('display-metrics-changed', syncOverlayBounds);
+    screen.on('display-added', syncOverlayBounds);
+    screen.on('display-removed', syncOverlayBounds);
+
+    if (process.argv.includes('--overlay-test')) {
+      runOverlaySelfTest();
+      return;
+    }
 
     setTimeout(() => checkUpdates(false), 8000);
     setInterval(() => checkUpdates(false), 6 * 60 * 60 * 1000);

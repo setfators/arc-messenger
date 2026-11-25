@@ -21,7 +21,7 @@ const check = (name, cond, extra) => {
   const apk = Buffer.from(await (await fetch(B + '/download/Arc.apk')).arrayBuffer());
   const sha = crypto.createHash('sha256').update(apk).digest('hex').toUpperCase();
   check('APK отдаётся', apk.length > 3_000_000, (apk.length / 1048576).toFixed(2) + ' МБ');
-  check('APK совпадает с локальным', sha === '4AE89D71B0B0050728175EDF3127E62FA1C35BF354082AF9DF12B4704C2DF865', sha.slice(0, 12));
+  check('APK совпадает с локальным', sha === '0B7D8CC046984E19BDC2EFD8D4745027C8C0F817C21BDC5BDE58413B476328F2', sha.slice(0, 12));
 
   console.log('\nпроблем: ' + problems.length);
   if (problems.length) process.exitCode = 1;

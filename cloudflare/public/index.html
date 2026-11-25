@@ -1219,7 +1219,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.11.0';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -4519,6 +4519,41 @@ function tabVoice(body) {
   sectKeys.appendChild(bindMore);
   sectKeys.appendChild(el('p', 'install-note', 'Бинды работают, когда фокус не в поле ввода. Esc закрывает окна и панели.'));
   body.appendChild(sectKeys);
+
+  // Оверлей поверх игр — только в десктоп-оболочке (1.11.0).
+  const desktop = window.messengerDesktop;
+  if (desktop && desktop.overlaySupported) {
+    const sectOv = el('div', 'sect');
+    sectOv.appendChild(el('h4', '', 'Оверлей поверх игр'));
+    sectOv.appendChild(el('p', 'install-note', 'Панель звонка и всплывающие сообщения поверх игры. Работает в безрамочном или оконном полном экране; в эксклюзивном полноэкранном режиме Windows скрывает оверлей.'));
+    const ovSwitch = addSwitch(sectOv, 'Показывать оверлей', 'Появляется во время звонка и при новых сообщениях', false, (v) => {
+      desktop.overlaySet({ enabled: v });
+    });
+    const ovKeys = el('p', 'install-note', '');
+    sectOv.appendChild(ovKeys);
+    const ovInfo = el('p', 'install-note', '');
+    sectOv.appendChild(ovInfo);
+    if (typeof desktop.overlayGet === 'function') {
+      Promise.resolve(desktop.overlayGet()).then((state) => {
+        const data = state || {};
+        ovSwitch.classList.toggle('on', !!data.enabled);
+        ovKeys.textContent = data.keys || '';
+        ovInfo.textContent = data.exclusiveFullscreenNote || '';
+      }).catch(() => {});
+    }
+    const ovMode = el('button', 'pill', 'Режим мыши в оверлее');
+    ovMode.type = 'button';
+    ovMode.style.marginTop = '8px';
+    ovMode.onclick = () => {
+      if (typeof desktop.overlaySet !== 'function') return;
+      Promise.resolve(desktop.overlayGet()).then((state) => {
+        const next = !(state && state.interactive);
+        return desktop.overlaySet({ interactive: next, enabled: next ? true : (state && state.enabled) });
+      }).then(() => toast('Режим мыши переключён в оверлее')).catch(() => {});
+    };
+    sectOv.appendChild(ovMode);
+    body.appendChild(sectOv);
+  }
 }
 /* --------------------------------------------------- бинды (1.10.0) */
 // Запись бинда: ждём клавишу или боковую кнопку мыши. Esc отменяет,
@@ -4843,7 +4878,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.10.0.apk');
+  apkLink.setAttribute('download', 'Arc-1.11.0.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';
