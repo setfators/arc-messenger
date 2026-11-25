@@ -74,11 +74,11 @@ function check(name, cond, extra) {
 
 await sleep(150);
 const ws = sockets[0];
-check('версия клиента 1.9.0', window.APP_VERSION === '1.9.0' || $('body').textContent.includes('1.9.0'), 'APP_VERSION');
+check('версия клиента 1.10.0', window.APP_VERSION === '1.10.0' || $('body').textContent.includes('1.10.0'), 'APP_VERSION');
 ws.open();
 
 ws.push({
-  t: 'hello', version: '1.9.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
+  t: 'hello', version: '1.10.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
   me: { name: 'anna', color: '#5865f2', profile: { displayName: 'Анна', avatarUrl: '' }, status: 'online', settings: { status: 'online' } },
   channels: ['obshiy'],
   channelItems: [{ room: 'obshiy', title: 'obshiy', owner: 'anna', ownerKey: 'anna', mine: true, count: 1, members: [{ name: 'anna', displayName: 'Анна', online: true }] }],
@@ -267,13 +267,53 @@ if (voiceTabBtn) {
     check('режим «нажми и говори» уходит на сервер', !!pttSent, JSON.stringify(ws.sent.filter((m) => m.t === 'settings_update').slice(-2)));
   }
 }
+// --- вкладка «Бинды»: запись клавиши и боковой кнопки мыши -----------------
+const bindsTabBtn = doc.querySelector('[data-tab="binds"]');
+check('вкладка «Бинды» есть', !!bindsTabBtn, [...doc.querySelectorAll('.settings-nav button')].map((b) => b.textContent).join('|'));
+if (bindsTabBtn) {
+  bindsTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(70);
+  const bindBtns = [...doc.querySelectorAll('#settingsBody .bind-btn')];
+  check('в списке биндов все действия', bindBtns.length >= 9, 'buttons=' + bindBtns.length);
+  // Запись клавиши: кликаем по бинду поиска и нажимаем комбинацию.
+  if (bindBtns.length >= 2) {
+    bindBtns[1].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await sleep(40);
+    check('кнопка бинда перешла в режим записи', bindBtns[1].classList.contains('listen'), bindBtns[1].className);
+    doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, shiftKey: true, bubbles: true }));
+    await sleep(500);
+    const keySaved = ws.sent.filter((m) => m.t === 'settings_update' && m.settings && m.settings.binds
+      && m.settings.binds.search === 'Ctrl+Shift+KeyK').pop();
+    check('бинду назначается клавиша', !!keySaved, JSON.stringify(ws.sent.filter((m) => m.t === 'settings_update').slice(-2)));
+  }
+  // Запись боковой кнопки мыши: Mouse4 = button 3.
+  const bindBtns2 = [...doc.querySelectorAll('#settingsBody .bind-btn')];
+  if (bindBtns2.length >= 2) {
+    bindBtns2[1].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await sleep(40);
+    doc.dispatchEvent(new window.MouseEvent('mousedown', { button: 3, bubbles: true }));
+    await sleep(500);
+    const mouseSaved = ws.sent.filter((m) => m.t === 'settings_update' && m.settings && m.settings.binds
+      && m.settings.binds.search === 'Mouse4').pop();
+    check('бинду назначается боковая кнопка мыши', !!mouseSaved, JSON.stringify(ws.sent.filter((m) => m.t === 'settings_update').slice(-2)));
+    if (mouseSaved) {
+      // Теперь Mouse4 должен открывать поиск.
+      doc.dispatchEvent(new window.MouseEvent('mousedown', { button: 3, bubbles: true }));
+      await sleep(150);
+      const pane = $('#searchPane');
+      check('боковая кнопка мыши выполняет действие', !!pane && !pane.classList.contains('hidden'), pane ? pane.className : 'нет панели');
+      doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+      await sleep(60);
+    }
+  }
+}
 const accountTabBtn = doc.querySelector('[data-tab="account"]');
 check('вкладка «Аккаунт» есть', !!accountTabBtn);
 if (accountTabBtn) {
   accountTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await sleep(60);
   const bodyText = ($('#settingsBody') ? $('#settingsBody').textContent : '') || '';
-  check('в аккаунте видна версия', /1\.9\.\d+/.test(bodyText), bodyText.slice(0, 200));
+  check('в аккаунте видна версия', /1\.10\.\d+/.test(bodyText), bodyText.slice(0, 200));
   const passInputs = [...doc.querySelectorAll('#settingsBody input[type="password"]')];
   check('три поля для смены пароля', passInputs.length >= 3, 'inputs=' + passInputs.length);
   if (passInputs.length >= 3) {

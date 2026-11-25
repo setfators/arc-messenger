@@ -887,6 +887,19 @@
     .jump-down { right: 12px; bottom: 88px; }
   }
 
+  /* ---------- бинды 1.10.0 ---------- */
+  .bind-btn {
+    min-width: 210px; padding: 8px 12px; border-radius: 9px; cursor: pointer;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    font: inherit; font-size: 13px; text-align: center;
+    transition: border-color var(--t1) var(--ease), background var(--t1) var(--ease), color var(--t1) var(--ease);
+  }
+  .bind-btn:hover { border-color: var(--accent); }
+  .bind-btn.listen {
+    border-color: var(--accent); color: var(--accent);
+    animation: softPulse 1.2s ease-in-out infinite;
+  }
+  .bind-btn.listen::selection { background: transparent; }
   /* Тосты и мелочи. */
   .toast.show { animation: toastIn var(--t2) var(--ease-out); }
   .vtile .vscreen, .call-people { transition: opacity var(--t2) var(--ease); }
@@ -1059,6 +1072,7 @@
       <button data-tab="notify">Уведомления</button>
       <button data-tab="privacy">Приватность</button>
       <button data-tab="voice">Голос и видео</button>
+      <button data-tab="binds">Бинды</button>
       <button data-tab="stickers">Стикеры и эмодзи</button>
       <button data-tab="bridges">Мосты и сервер</button>
       <button data-tab="account">Аккаунт</button>
@@ -1205,7 +1219,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -3436,7 +3450,7 @@ function renderVoiceBox() {
     if (pttModeOn()) {
       hint.textContent = pttHeld
         ? '🎙 Микрофон открыт — говорите'
-        : 'Удерживайте ' + formatCombo(S().pttKey) + ' для речи';
+        : 'Удерживайте ' + formatCombo(bindOf('ptt')) + ' для речи';
     }
   }
   const list = $('voiceUsers');
@@ -3691,6 +3705,36 @@ let soundCtx = null;
 let saveTimer = null;
 let updateUnsub = null;
 
+/* Бинды (1.10.0): константы объявлены до настроек, потому что applySettings
+   обращается к DEFAULT_BINDS уже при первой загрузке страницы. */
+const MODIFIER_CODES = ['ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight', 'MetaLeft', 'MetaRight'];
+const BIND_MODS = ['Alt', 'Ctrl', 'Shift', 'Meta'];
+// Действия, которые можно повесить на клавишу или боковую кнопку мыши.
+// id совпадает с ключом в настройках `binds`.
+const BIND_ACTIONS = [
+  { id: 'ptt', label: '«Нажми и говори»', hint: 'Держать, пока говорите (в голосовом канале или звонке)' },
+  { id: 'search', label: 'Поиск по истории', hint: 'Открывает и закрывает поиск' },
+  { id: 'prevChat', label: 'Предыдущий чат', hint: 'Переключение между личками и каналами' },
+  { id: 'nextChat', label: 'Следующий чат', hint: 'Переключение между личками и каналами' },
+  { id: 'mic', label: 'Микрофон вкл/выкл', hint: 'Только в голосовом канале' },
+  { id: 'screen', label: 'Показать/остановить экран', hint: 'Только в голосовом канале' },
+  { id: 'leaveVoice', label: 'Выйти из голосового', hint: 'Завершает звонок или выход из канала' },
+  { id: 'friends', label: 'Открыть «Друзья»', hint: 'Список друзей и заявок' },
+  { id: 'invite', label: 'Скопировать ссылку', hint: 'Ссылка-приглашение в Arc' },
+];
+const DEFAULT_BINDS = {
+  ptt: 'Alt+KeyV',
+  search: 'Ctrl+KeyK',
+  prevChat: 'Alt+ArrowUp',
+  nextChat: 'Alt+ArrowDown',
+  mic: 'Alt+KeyM',
+  screen: 'Alt+KeyE',
+  leaveVoice: 'Alt+Shift+KeyQ',
+  friends: 'Alt+KeyJ',
+  invite: 'Alt+KeyI',
+};
+const MOUSE_BINDS = { Mouse4: 3, Mouse5: 4 };
+
 function settingsDefaults() {
   return {
     theme: 'dark', fontScale: 100, compact: false, showTime: true, showTyping: true, animations: true,
@@ -3704,6 +3748,18 @@ function settingsDefaults() {
     micSensitivity: 50,
     voiceMode: 'activity',
     pttKey: 'Alt+KeyV',
+    // Бинды (1.10.0): клавиши и боковые кнопки мыши.
+    binds: {
+      ptt: 'Alt+KeyV',
+      search: 'Ctrl+KeyK',
+      prevChat: 'Alt+ArrowUp',
+      nextChat: 'Alt+ArrowDown',
+      mic: 'Alt+KeyM',
+      screen: 'Alt+KeyE',
+      leaveVoice: 'Alt+Shift+KeyQ',
+      friends: 'Alt+KeyJ',
+      invite: 'Alt+KeyI',
+    },
     noiseSuppress: true, echoCancel: true, autoGain: true,
     turnUrl: '', turnUser: '', turnPass: '',
   };
@@ -3800,6 +3856,13 @@ function micGateTick() {
 }
 function applySettings(next) {
   store.settings = Object.assign(settingsDefaults(), store.settings || {}, next || {});
+  // Бинды держим полным набором: частичное сохранение не должно терять остальные.
+  const mergedBinds = { ...DEFAULT_BINDS, ...(store.settings.binds || {}) };
+  // Совместимость: старый pttKey из версий до 1.10.0 переезжает в binds.ptt.
+  if (store.settings.pttKey && (!store.settings.binds || !store.settings.binds.ptt)) {
+    mergedBinds.ptt = store.settings.pttKey;
+  }
+  store.settings.binds = mergedBinds;
   const s = store.settings;
   const theme = THEME_LIST.some((t) => t[0] === s.theme) ? s.theme : 'dark';
   document.documentElement.dataset.theme = theme;
@@ -4391,38 +4454,16 @@ function tabVoice(body) {
     s.voiceMode === 'ptt' ? 'ptt' : 'activity',
     (v) => { saveSettings({ voiceMode: v }); if (store.voiceRoom) renderVoiceBox(); }
   );
-  const pttRow = mkRow('Клавиша «нажми и говори»', 'Удерживайте её в голосовом канале, чтобы говорить');
-  const pttBtn = el('button', '', formatCombo(s.pttKey || 'Alt+KeyV'));
+  const pttRow = mkRow('Бинд «нажми и говори»', 'Клавиша или боковая кнопка мыши. Все бинды — во вкладке «Бинды»');
+  const pttBtn = el('button', '', formatCombo(bindOf('ptt')));
   pttBtn.type = 'button';
+  pttBtn.onclick = () => {
+    closeSettings();
+    openSettings('binds');
+  };
   pttRow.appendChild(pttBtn);
   sectMic.appendChild(pttRow);
-  let pttListening = false;
-  let pttListenHandler = null;
-  const stopPttListen = () => {
-    pttListening = false;
-    if (pttListenHandler) {
-      document.removeEventListener('keydown', pttListenHandler, true);
-      pttListenHandler = null;
-    }
-    pttBtn.classList.remove('listen');
-    pttBtn.textContent = formatCombo(S().pttKey || 'Alt+KeyV');
-  };
-  pttBtn.onclick = () => {
-    if (pttListening) { stopPttListen(); return; }
-    pttListening = true;
-    pttBtn.classList.add('listen');
-    pttBtn.textContent = 'Нажмите клавиши… (Esc — отмена)';
-    pttListenHandler = (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); stopPttListen(); return; }
-      if (MODIFIER_CODES.includes(event.code)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      saveSettings({ pttKey: hotkeyCombo(event) });
-      stopPttListen();
-    };
-    document.addEventListener('keydown', pttListenHandler, true);
-  };
-  sectMic.appendChild(el('p', 'install-note', 'Порог и режим применяются сразу. Комбинация работает, когда фокус не в поле ввода.'));
+  sectMic.appendChild(el('p', 'install-note', 'Порог и режим применяются сразу. Бинд работает, когда фокус не в поле ввода.'));
   body.appendChild(sectMic);
 
   const sect3 = el('div', 'sect');
@@ -4459,21 +4500,115 @@ function tabVoice(body) {
   };
   body.appendChild(sect4);
 
-  // Горячие клавиши: список фиксированный, чтобы не плодить конфликты.
+  // Список биндов: меняются во вкладке «Бинды».
   const sectKeys = el('div', 'sect');
-  sectKeys.appendChild(el('h4', '', 'Клавиатура'));
+  sectKeys.appendChild(el('h4', '', 'Бинды'));
   const keyList = el('div', 'hk-list');
-  for (const item of HOTKEYS) {
+  for (const item of BIND_ACTIONS) {
     const row = el('div', 'hk-row');
     const keys = el('span', 'hk-keys');
-    for (const spec of item.keys) keys.appendChild(el('span', 'kbd', formatCombo(spec)));
+    keys.appendChild(el('span', 'kbd', formatCombo(bindOf(item.id))));
     row.append(keys, el('span', 'hk-do', item.label));
     keyList.appendChild(row);
   }
   sectKeys.appendChild(keyList);
-  sectKeys.appendChild(el('p', 'install-note', 'Комбинации работают, когда фокус не в поле ввода. Esc закрывает окна и панели.'));
+  const bindMore = el('button', 'pill', 'Настроить бинды');
+  bindMore.type = 'button';
+  bindMore.style.marginTop = '8px';
+  bindMore.onclick = () => { closeSettings(); openSettings('binds'); };
+  sectKeys.appendChild(bindMore);
+  sectKeys.appendChild(el('p', 'install-note', 'Бинды работают, когда фокус не в поле ввода. Esc закрывает окна и панели.'));
   body.appendChild(sectKeys);
 }
+/* --------------------------------------------------- бинды (1.10.0) */
+// Запись бинда: ждём клавишу или боковую кнопку мыши. Esc отменяет,
+// модификатор в одиночку биндом не считается.
+let bindCapture = null;
+function stopBindCapture() {
+  if (!bindCapture) return;
+  const { stop } = bindCapture;
+  bindCapture = null;
+  if (stop) stop();
+}
+function captureBind(anchor, onDone) {
+  stopBindCapture();
+  const previous = anchor.textContent;
+  const previousClass = anchor.className;
+  anchor.classList.add('listen');
+  anchor.textContent = 'Нажмите клавишу или кнопку мыши… (Esc — отмена)';
+  const finish = (spec) => {
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('mousedown', onMouse, true);
+    anchor.classList.remove('listen');
+    anchor.textContent = previous;
+    anchor.className = previousClass;
+    bindCapture = null;
+    if (spec) onDone(spec);
+  };
+  const onKey = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === 'Escape') { finish(''); return; }
+    if (MODIFIER_CODES.includes(event.code)) return; // ждём основную клавишу
+    finish(hotkeyCombo(event));
+  };
+  const onMouse = (event) => {
+    if (event.button !== 3 && event.button !== 4) return;
+    event.preventDefault();
+    event.stopPropagation();
+    finish(mouseBindCombo(event));
+  };
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('mousedown', onMouse, true);
+  bindCapture = { stop: () => finish('') };
+}
+function saveBind(id, spec) {
+  const next = { ...binds(), [id]: spec };
+  saveSettings({ binds: next });
+}
+
+function tabBinds(body) {
+  body.appendChild(headBlock('Бинды', 'Действия можно повесить на клавишу или на боковую кнопку мыши — кнопки «назад» и «вперёд» на корпусе.'));
+  const current = binds();
+  const sect = el('div', 'sect');
+  sect.appendChild(el('h4', '', 'Действия'));
+  for (const action of BIND_ACTIONS) {
+    const row = mkRow(action.label, action.hint);
+    const value = el('button', 'bind-btn', formatCombo(current[action.id]));
+    value.type = 'button';
+    value.title = 'Нажмите, чтобы назначить другую клавишу или кнопку мыши';
+    value.onclick = () => captureBind(value, (spec) => {
+      if (!spec) { renderSettings('binds'); return; }
+      saveBind(action.id, spec);
+      renderSettings('binds');
+      toast('Бинд сохранён: ' + formatCombo(spec));
+    });
+    const reset = el('button', 'pill', '↺');
+    reset.type = 'button';
+    reset.title = 'Вернуть по умолчанию';
+    reset.onclick = () => {
+      saveSettings({ binds: { ...binds(), [action.id]: DEFAULT_BINDS[action.id] } });
+      renderSettings('binds');
+    };
+    row.append(value, reset);
+    sect.appendChild(row);
+  }
+  body.appendChild(sect);
+
+  const sectReset = el('div', 'sect');
+  sectReset.appendChild(el('h4', '', 'Сброс'));
+  const resetAll = el('button', 'primary', 'Сбросить все бинды');
+  resetAll.type = 'button';
+  resetAll.onclick = () => {
+    saveSettings({ binds: { ...DEFAULT_BINDS } });
+    renderSettings('binds');
+    toast('Бинды сброшены');
+  };
+  sectReset.appendChild(resetAll);
+  sectReset.appendChild(el('p', 'install-note', 'Боковые кнопки мыши перехватываются только когда назначены на действие — иначе работают как обычно. В полях ввода бинды не срабатывают.'));
+  body.appendChild(sectReset);
+}
+
 function mxNow() {
   return store.matrix || {};
 }
@@ -4708,7 +4843,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.9.0.apk');
+  apkLink.setAttribute('download', 'Arc-1.10.0.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';
@@ -5326,7 +5461,7 @@ function renderSettings(tab) {
   document.querySelectorAll('.staff-only').forEach((node) => {
     node.classList.toggle('hidden', !store.isStaff);
   });
-  const tabs = { profile: tabProfile, appearance: tabAppearance, notify: tabNotify, privacy: tabPrivacy, voice: tabVoice, stickers: tabStickers, bridges: tabBridges, account: tabAccount, manage: tabManage, moderation: tabModeration };
+  const tabs = { profile: tabProfile, appearance: tabAppearance, notify: tabNotify, privacy: tabPrivacy, voice: tabVoice, binds: tabBinds, stickers: tabStickers, bridges: tabBridges, account: tabAccount, manage: tabManage, moderation: tabModeration };
   if (currentTab === 'manage' && !store.isOwner) currentTab = 'profile';
   if (currentTab === 'moderation' && !store.isStaff) currentTab = 'profile';
   (tabs[currentTab] || tabProfile)(body);
@@ -6289,11 +6424,26 @@ if ($('screenModal')) {
   };
 }
 
-/* ------------------------------------- клавиши и «нажми и говори» 1.8.0 */
+/* ------------------------------------- клавиши, мышь и «нажми и говори» */
+function binds() {
+  const saved = (S().binds && typeof S().binds === 'object') ? S().binds : {};
+  return { ...DEFAULT_BINDS, ...saved };
+}
+function bindOf(id) {
+  return binds()[id] || DEFAULT_BINDS[id] || '';
+}
 function comboParts(spec) {
   return String(spec || '').split('+').map((part) => part.trim()).filter(Boolean);
 }
-const MODIFIER_CODES = ['ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight', 'MetaLeft', 'MetaRight'];
+function isMouseBind(spec) {
+  const parts = comboParts(spec);
+  return parts.length > 0 && Object.prototype.hasOwnProperty.call(MOUSE_BINDS, parts[parts.length - 1]);
+}
+function mouseButtonOf(spec) {
+  const parts = comboParts(spec);
+  const last = parts[parts.length - 1];
+  return Object.prototype.hasOwnProperty.call(MOUSE_BINDS, last) ? MOUSE_BINDS[last] : -1;
+}
 function hotkeyCombo(event) {
   const parts = [];
   if (event.ctrlKey) parts.push('Ctrl');
@@ -6303,11 +6453,20 @@ function hotkeyCombo(event) {
   if (event.code) parts.push(event.code);
   return parts.join('+');
 }
-function comboMatches(event, spec) {
-  const want = comboParts(spec);
-  if (!want.length) return false;
-  const code = want[want.length - 1];
-  if (code !== event.code) return false;
+// Бинд по кнопке мыши: Mouse4 — «назад», Mouse5 — «вперёд».
+function mouseBindCombo(event) {
+  const map = { 3: 'Mouse4', 4: 'Mouse5' };
+  const code = map[event.button];
+  if (!code) return '';
+  const parts = [];
+  if (event.ctrlKey) parts.push('Ctrl');
+  if (event.altKey) parts.push('Alt');
+  if (event.shiftKey) parts.push('Shift');
+  if (event.metaKey) parts.push('Meta');
+  parts.push(code);
+  return parts.join('+');
+}
+function modifiersMatch(event, want) {
   const mods = { Ctrl: event.ctrlKey, Alt: event.altKey, Shift: event.shiftKey, Meta: event.metaKey };
   for (const mod of want.slice(0, -1)) {
     if (!mods[mod]) return false;
@@ -6317,9 +6476,23 @@ function comboMatches(event, spec) {
   }
   return true;
 }
+function comboMatches(event, spec) {
+  const want = comboParts(spec);
+  if (!want.length) return false;
+  if (isMouseBind(spec)) return false; // мышь проверяется отдельным обработчиком
+  if (want[want.length - 1] !== event.code) return false;
+  return modifiersMatch(event, want);
+}
+function mouseBindMatches(event, spec) {
+  if (!isMouseBind(spec)) return false;
+  if (mouseButtonOf(spec) !== event.button) return false;
+  return modifiersMatch(event, comboParts(spec));
+}
 function formatCombo(spec) {
   return comboParts(spec).map((part) => {
-    if (part === 'Alt' || part === 'Ctrl' || part === 'Shift' || part === 'Meta') return part;
+    if (BIND_MODS.includes(part)) return part;
+    if (part === 'Mouse4') return 'Мышь 4 (назад)';
+    if (part === 'Mouse5') return 'Мышь 5 (вперёд)';
     if (part === 'Space') return 'Пробел';
     return String(part)
       .replace(/^Key/, '')
@@ -6347,47 +6520,93 @@ function cycleRoom(delta) {
   index = (index + delta + rooms.length) % rooms.length;
   openRoomByKey(rooms[index]);
 }
-const HOTKEYS = [
-  { keys: ['Ctrl+KeyK', 'Ctrl+KeyF'], label: 'Поиск по истории', run: () => { const btn = $('searchBtn'); if (btn) btn.click(); } },
-  { keys: ['Alt+ArrowUp'], label: 'Предыдущий чат', run: () => cycleRoom(-1) },
-  { keys: ['Alt+ArrowDown'], label: 'Следующий чат', run: () => cycleRoom(1) },
-  { keys: ['Alt+KeyM'], label: 'Микрофон вкл/выкл', run: () => { if (store.voiceRoom) $('micBtn').click(); } },
-  { keys: ['Alt+KeyE'], label: 'Показать/остановить экран', run: () => { if (store.voiceRoom) openScreenDialog(); } },
-  { keys: ['Alt+Shift+KeyQ'], label: 'Выйти из голосового', run: () => { if (store.voiceRoom) leaveVoice(); } },
-  { keys: ['Alt+KeyJ'], label: 'Открыть «Друзья»', run: () => { const btn = $('navFriends'); if (btn) btn.click(); } },
-  { keys: ['Alt+KeyI'], label: 'Скопировать ссылку-приглашение', run: () => { const btn = $('navInvite'); if (btn) btn.click(); } },
-];
+// Что делает каждое действие.
+const BIND_RUN = {
+  search: () => { const btn = $('searchBtn'); if (btn) btn.click(); },
+  prevChat: () => cycleRoom(-1),
+  nextChat: () => cycleRoom(1),
+  mic: () => { if (store.voiceRoom) $('micBtn').click(); },
+  screen: () => { if (store.voiceRoom) openScreenDialog(); },
+  leaveVoice: () => { if (store.voiceRoom) leaveVoice(); },
+  friends: () => { const btn = $('navFriends'); if (btn) btn.click(); },
+  invite: () => { const btn = $('navInvite'); if (btn) btn.click(); },
+};
 function findHotkey(event) {
-  return HOTKEYS.find((item) => item.keys.some((spec) => comboMatches(event, spec)));
+  return BIND_ACTIONS.find((item) => {
+    if (item.id === 'ptt') return false;
+    const spec = bindOf(item.id);
+    return comboMatches(event, spec);
+  });
 }
-document.addEventListener('keydown', (event) => {
-  if (event.defaultPrevented) return;
-  // «Нажми и говори»: пока держат комбинацию, микрофон открыт. В полях ввода
-  // комбинацию не перехватываем, чтобы можно было печатать.
-  if (pttModeOn() && store.voiceRoom && !isTypingTarget(event.target) && comboMatches(event, S().pttKey)) {
-    if (!pttHeld) { pttHeld = true; renderVoiceBox(); }
+function findMouseHotkey(event) {
+  return BIND_ACTIONS.find((item) => {
+    if (item.id === 'ptt') return false;
+    return mouseBindMatches(event, bindOf(item.id));
+  });
+}
+// «Нажми и говори» с любой клавиши/кнопки мыши.
+function pttBindActive() {
+  return pttModeOn() && !!store.voiceRoom && !isTypingTarget(document.activeElement);
+}
+function startPtt() {
+  if (pttHeld) return;
+  pttHeld = true;
+  renderVoiceBox();
+}
+function stopPtt() {
+  if (!pttHeld) return;
+  pttHeld = false;
+  renderVoiceBox();
+}
+if (document.addEventListener) {
+  document.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented) return;
+    // «Нажми и говори»: пока держат бинд, микрофон открыт. В полях ввода
+    // комбинацию не перехватываем, чтобы можно было печатать.
+    if (pttBindActive() && comboMatches(event, bindOf('ptt'))) {
+      startPtt();
+      event.preventDefault();
+      return;
+    }
+    if (isTypingTarget(event.target)) return;
+    if (event.repeat) return;
+    const hot = findHotkey(event);
+    if (!hot) return;
     event.preventDefault();
-    return;
-  }
-  if (isTypingTarget(event.target)) return;
-  if (event.repeat) return;
-  const hot = findHotkey(event);
-  if (!hot) return;
-  event.preventDefault();
-  hot.run();
-});
-document.addEventListener('keyup', (event) => {
-  if (!pttHeld) return;
-  // Отпустили саму клавишу или любую из модификаторов — микрофон закрываем.
-  if (!comboMatches(event, S().pttKey) && !MODIFIER_CODES.includes(event.code)) return;
-  pttHeld = false;
-  renderVoiceBox();
-});
-window.addEventListener('blur', () => {
-  if (!pttHeld) return;
-  pttHeld = false;
-  renderVoiceBox();
-});
+    const run = BIND_RUN[hot.id];
+    if (run) run();
+  });
+  document.addEventListener('keyup', (event) => {
+    if (!pttHeld) return;
+    // Отпустили саму клавишу или любую из модификаторов — микрофон закрываем.
+    if (!comboMatches(event, bindOf('ptt')) && !MODIFIER_CODES.includes(event.code)) return;
+    stopPtt();
+  });
+  // Боковые кнопки мыши. preventDefault обязателен: иначе браузер уйдёт
+  // назад/вперёд по истории и закроет приложение.
+  document.addEventListener('mousedown', (event) => {
+    if (event.button !== 3 && event.button !== 4) return;
+    if (pttBindActive() && mouseBindMatches(event, bindOf('ptt'))) {
+      event.preventDefault();
+      startPtt();
+      return;
+    }
+    if (isTypingTarget(event.target)) return;
+    const hot = findMouseHotkey(event);
+    if (!hot) return;
+    event.preventDefault();
+    const run = BIND_RUN[hot.id];
+    if (run) run();
+  }, true);
+  document.addEventListener('mouseup', (event) => {
+    if (!pttHeld) return;
+    if (event.button !== 3 && event.button !== 4) return;
+    if (!mouseBindMatches(event, bindOf('ptt'))) return;
+    event.preventDefault();
+    stopPtt();
+  }, true);
+  window.addEventListener('blur', () => stopPtt());
+}
 
 /* ------------------------------------- смена экрана на лету 1.8.1 */
 // Настройки захвата одинаковые и для старта, и для смены источника.

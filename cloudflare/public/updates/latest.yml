@@ -1,8 +1,8 @@
-version: 1.9.0
+version: 1.10.0
 files:
-  - url: Arc-Setup-1.9.0.exe
-    sha512: 8dcyn6MuvrF7pqr98QCMu/YAiL6vLlRbjj5VENOBDf/DRLeY4kBfIgcGl2wltKh71hcjBeY1L5n27cw8ZeMrPQ==
-    size: 121656778
-path: Arc-Setup-1.9.0.exe
-sha512: 8dcyn6MuvrF7pqr98QCMu/YAiL6vLlRbjj5VENOBDf/DRLeY4kBfIgcGl2wltKh71hcjBeY1L5n27cw8ZeMrPQ==
-releaseDate: '2026-11-25T06:07:56.383Z'
+  - url: Arc-Setup-1.10.0.exe
+    sha512: uU2wjIt66/Ed7Uc4+cWdvVN6/u7zWVskRYkjw7QlQvRe3DPEWOzN+IQdtssAhQVhs+J2xqGSuMZjwIFWRrUHHA==
+    size: 121656807
+path: Arc-Setup-1.10.0.exe
+sha512: uU2wjIt66/Ed7Uc4+cWdvVN6/u7zWVskRYkjw7QlQvRe3DPEWOzN+IQdtssAhQVhs+J2xqGSuMZjwIFWRrUHHA==
+releaseDate: '2026-11-25T11:27:41.772Z'

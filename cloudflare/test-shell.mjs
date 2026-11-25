@@ -37,6 +37,9 @@ for (const [name, html] of [['сайт', web], ['APK', mobile]]) {
   check(name + ': уважение «меньше движения»', html.includes('prefers-reduced-motion'), '');
   check(name + ': настройка «Плавные анимации»', html.includes('no-anim') && html.includes('Плавные анимации') && html.includes('animations: true'), '');
   check(name + ': кнопка «вниз / новые сообщения»', html.includes('id="jumpDown"') && html.includes('function jumpToBottom') && html.includes('updateJumpDown'), '');
+  check(name + ': вкладка «Бинды»', html.includes('data-tab="binds"') && html.includes('function tabBinds'), '');
+  check(name + ': бинды на боковые кнопки мыши', html.includes('Mouse4') && html.includes('mouseBindMatches') && html.includes('mouseBindCombo'), '');
+  check(name + ': запись бинда', html.includes('function captureBind') && html.includes('bind-btn'), '');
   check(name + ': мини-превью экранов', html.includes('scr-tile') && html.includes('scr-tile-name'), '');
   check(name + ': адаптивная вёрстка', html.includes('100dvh') && html.includes('safe-area-inset') && html.includes('@media (max-width: 480px)'), '');
   check(name + ': пересчёт размеров окна', html.includes('function syncViewport') && html.includes("addEventListener('orientationchange'"), '');

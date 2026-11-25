@@ -326,7 +326,50 @@ try {
   check('канал удалён из списка',
     await waitFor(`![...document.querySelectorAll('#channels .nm')].some((n) => n.textContent.includes(${JSON.stringify(chanTitle)}))`));
 
-  // 10. Адаптив: мобильная ширина переключает раскладку.
+  // 10. Бинды: запись боковой кнопки мыши и её срабатывание (1.10.0).
+  await evaluate("document.querySelector('#navSettings').click()");
+  await waitFor("!document.querySelector('#settingsModal').classList.contains('hidden')");
+  await evaluate("document.querySelector('[data-tab=\"binds\"]').click()");
+  check('вкладка «Бинды» открывается', await waitFor("document.querySelectorAll('#settingsBody .bind-btn').length >= 9"));
+  const bindCount = await evaluate("document.querySelectorAll('#settingsBody .bind-btn').length");
+  check('в списке биндов 9 действий', bindCount === 9, 'buttons=' + bindCount);
+  // Назначаем поиску боковую кнопку мыши Mouse4 (button 3).
+  await evaluate(`(() => {
+    const btn = document.querySelectorAll('#settingsBody .bind-btn')[1];
+    btn.click();
+    document.dispatchEvent(new MouseEvent('mousedown', { button: 3, bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await sleep(600);
+  const bindText = await evaluate("document.querySelectorAll('#settingsBody .bind-btn')[1].textContent");
+  check('бинду назначается боковая кнопка мыши', typeof bindText === 'string' && bindText.includes('Мышь 4'), String(bindText));
+
+  // Закрываем настройки и проверяем, что Mouse4 действительно открывает поиск.
+  await evaluate("document.querySelector('#settingsClose').click()");
+  await sleep(250);
+  await evaluate("document.dispatchEvent(new MouseEvent('mousedown', { button: 3, bubbles: true, cancelable: true }))");
+  check('боковая кнопка мыши выполняет действие',
+    await waitFor("!document.querySelector('#searchPane').classList.contains('hidden')", 4000));
+  await evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }))");
+  await sleep(200);
+
+  // Возвращаем бинды по умолчанию.
+  await evaluate("document.querySelector('#navSettings').click()");
+  await waitFor("!document.querySelector('#settingsModal').classList.contains('hidden')");
+  await evaluate("document.querySelector('[data-tab=\"binds\"]').click()");
+  await waitFor("document.querySelectorAll('#settingsBody .bind-btn').length >= 9");
+  await evaluate(`(() => {
+    const reset = [...document.querySelectorAll('#settingsBody button')].find((b) => b.textContent.includes('Сбросить все'));
+    if (reset) reset.click();
+    return !!reset;
+  })()`);
+  await sleep(600);
+  const resetText = await evaluate("document.querySelectorAll('#settingsBody .bind-btn')[1].textContent");
+  check('бинды сбрасываются по умолчанию', typeof resetText === 'string' && resetText.includes('Ctrl'), String(resetText));
+  await evaluate("document.querySelector('#settingsClose').click()");
+  await sleep(200);
+
+  // 11. Адаптив: мобильная ширина переключает раскладку.
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await sleep(400);
   const mobile = await evaluate(`(() => {

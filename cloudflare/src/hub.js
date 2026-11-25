@@ -4,7 +4,7 @@
 
 import { mxDefault, mxNorm, mxPublic, mxSend, mxSync, mxWhoami } from './matrix.js';
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 const HISTORY_LIMIT = 300;
 const MAX_TEXT_CHARS = 4000;
 // Приватные каналы (1.5.0): канал виден только создателю и тем, кого он позвал.
@@ -98,6 +98,18 @@ function defaultSettings() {
     screenAsk: true,      // спрашивать настройки при каждом включении показа
     micSensitivity: 50,   // 0..100 — порог срабатывания микрофона
     pttKey: 'Alt+KeyV',   // комбинация «нажми и говори»
+    // Бинды действий (1.10.0): клавиши и боковые кнопки мыши (Mouse4/Mouse5).
+    binds: {
+      ptt: 'Alt+KeyV',
+      search: 'Ctrl+KeyK',
+      prevChat: 'Alt+ArrowUp',
+      nextChat: 'Alt+ArrowDown',
+      mic: 'Alt+KeyM',
+      screen: 'Alt+KeyE',
+      leaveVoice: 'Alt+Shift+KeyQ',
+      friends: 'Alt+KeyJ',
+      invite: 'Alt+KeyI',
+    },
     voiceInput: '',       // deviceId микрофона
     voiceOutput: '',      // deviceId наушников
     voiceVolume: 100,     // 0..200
@@ -138,6 +150,19 @@ function mergeSettings(base, patch) {
     out.micSensitivity = num(patch.micSensitivity, 0, 100, out.micSensitivity);
   }
   if (typeof patch.pttKey === 'string') out.pttKey = clip(patch.pttKey, 40);
+  // Бинды: принимаем только известные действия и только безопасные коды.
+  // «Голый» модификатор (Alt/Shift/…) биндом быть не может — иначе он
+  // перехватывал бы всё подряд.
+  if (patch.binds && typeof patch.binds === 'object') {
+    const next = { ...(defaultSettings().binds), ...(out.binds || {}) };
+    for (const key of Object.keys(next)) {
+      const raw = patch.binds[key];
+      if (typeof raw !== 'string') continue;
+      const value = bindSpec(raw);
+      if (value) next[key] = value;
+    }
+    out.binds = next;
+  }
   if (patch.searchPrivacy === 'all' || patch.searchPrivacy === 'friends') out.searchPrivacy = patch.searchPrivacy;
   for (const flag of ['compact', 'showTime', 'enterToSend', 'notifySound', 'notifyDesktop', 'notifyAll', 'dnd', 'showTyping', 'showAvatars', 'groupMessages', 'clock24', 'animations', 'noiseSuppress', 'echoCancel', 'autoGain']) {
     if (typeof patch[flag] === 'boolean') out[flag] = patch[flag];
@@ -256,6 +281,23 @@ function jsonResponse(value, status = 200) {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   });
+}
+
+// Бинд действия: модификаторы + клавиша (Alt+KeyV) или боковая кнопка мыши
+// (Mouse4 / Mouse5). Всё остальное сервер отбрасывает.
+const BIND_MODS = ['Alt', 'Ctrl', 'Shift', 'Meta'];
+const BIND_CODES = /^(Key[A-Z]|Digit[0-9]|F[1-9]|F1[0-2]|Arrow(Up|Down|Left|Right)|Space|Tab|Enter|Escape|Backquote|Minus|Equal|BracketLeft|BracketRight|Semicolon|Quote|Comma|Period|Slash|Backslash|Numpad[0-9]|Mouse[45])$/;
+function bindSpec(raw) {
+  const parts = String(raw || '').trim().split('+').map((one) => one.trim()).filter(Boolean);
+  if (!parts.length || parts.length > 4) return '';
+  const code = parts[parts.length - 1];
+  if (!BIND_CODES.test(code)) return '';
+  for (const mod of parts.slice(0, -1)) {
+    if (!BIND_MODS.includes(mod)) return '';
+  }
+  // Дубли модификаторов не нужны.
+  if (new Set(parts).size !== parts.length) return '';
+  return parts.join('+');
 }
 
 async function hashPassword(password, salt) {
