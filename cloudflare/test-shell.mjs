@@ -41,6 +41,8 @@ for (const [name, html] of [['сайт', web], ['APK', mobile]]) {
   check(name + ': бинды на боковые кнопки мыши', html.includes('Mouse4') && html.includes('mouseBindMatches') && html.includes('mouseBindCombo'), '');
   check(name + ': запись бинда', html.includes('function captureBind') && html.includes('bind-btn'), '');
   check(name + ': блок оверлея в настройках', html.includes('Оверлей поверх игр') && html.includes('overlaySupported'), '');
+  check(name + ': оверлей как в Discord (только поверх игр, угол, размер)', html.includes('Только поверх игр') && html.includes('Угол панели') && html.includes('Размер панели'), '');
+  check(name + ': подсветка «кто говорит»', html.includes('function watchVoiceLevel') && html.includes('.vtile.speaking') && html.includes('voiceLevelTick'), '');
   check(name + ': мини-превью экранов', html.includes('scr-tile') && html.includes('scr-tile-name'), '');
   check(name + ': адаптивная вёрстка', html.includes('100dvh') && html.includes('safe-area-inset') && html.includes('@media (max-width: 480px)'), '');
   check(name + ': пересчёт размеров окна', html.includes('function syncViewport') && html.includes("addEventListener('orientationchange'"), '');

@@ -1,1 +1,1 @@
-{"name":"arc-mobile","version":"1.11.0","private":true,"dependencies":{"@capacitor/android":"^8.6.2","@capacitor/cli":"^8.6.2","@capacitor/core":"^8.6.2"}}
+{"name":"arc-mobile","version":"1.12.0","private":true,"dependencies":{"@capacitor/android":"^8.6.2","@capacitor/cli":"^8.6.2","@capacitor/core":"^8.6.2"}}

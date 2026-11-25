@@ -4,7 +4,7 @@
 
 import { mxDefault, mxNorm, mxPublic, mxSend, mxSync, mxWhoami } from './matrix.js';
 
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 const HISTORY_LIMIT = 300;
 const MAX_TEXT_CHARS = 4000;
 // Приватные каналы (1.5.0): канал виден только создателю и тем, кого он позвал.
@@ -77,17 +77,13 @@ function defaultSettings() {
     fontScale: 100,       // 85..130
     compact: false,
     showTime: true,
-    enterToSend: true,
     notifySound: true,
     notifyDesktop: true,  // всплывающие уведомления (браузер спросит разрешение)
     notifyAll: true,      // обо всех сообщениях, иначе только ЛС и упоминания
     soundVolume: 60,      // 0..100
     dnd: false,
     showTyping: true,
-    showAvatars: true,
     animations: true,     // плавные анимации интерфейса (1.9.0)
-    groupMessages: true,  // склеивать подряд идущие сообщения автора
-    clock24: true,
     dmPrivacy: 'all',     // all | friends
     searchPrivacy: 'all', // all | friends — кто может найти меня по имени
     status: 'online',     // online | idle | dnd | invisible
@@ -164,7 +160,7 @@ function mergeSettings(base, patch) {
     out.binds = next;
   }
   if (patch.searchPrivacy === 'all' || patch.searchPrivacy === 'friends') out.searchPrivacy = patch.searchPrivacy;
-  for (const flag of ['compact', 'showTime', 'enterToSend', 'notifySound', 'notifyDesktop', 'notifyAll', 'dnd', 'showTyping', 'showAvatars', 'groupMessages', 'clock24', 'animations', 'noiseSuppress', 'echoCancel', 'autoGain']) {
+  for (const flag of ['compact', 'showTime', 'notifySound', 'notifyDesktop', 'notifyAll', 'dnd', 'showTyping', 'animations', 'noiseSuppress', 'echoCancel', 'autoGain']) {
     if (typeof patch[flag] === 'boolean') out[flag] = patch[flag];
   }
   if (patch.dmPrivacy === 'all' || patch.dmPrivacy === 'friends') out.dmPrivacy = patch.dmPrivacy;

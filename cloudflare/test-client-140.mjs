@@ -39,12 +39,12 @@ const dom = new JSDOM(html, {
     window.prompt = () => null;
     window.alert = () => {};
     window.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
-    // Мост десктоп-оболочки: оверлей поверх игр (1.11.0).
+    // Мост десктоп-оболочки: оверлей поверх игр (1.12.0).
     window.messengerDesktop = {
       isDesktop: true,
       overlaySupported: true,
       overlayToggle: () => overlayCalls.push('toggle'),
-      overlayGet: () => { overlayCalls.push('get'); return Promise.resolve({ enabled: false, interactive: false, keys: 'Shift+` — скрыть/показать · Ctrl+Shift+O — режим мыши' }); },
+      overlayGet: () => { overlayCalls.push('get'); return Promise.resolve({ enabled: true, interactive: false, always: false, corner: 'tl', scale: 100, apps: ['notepad'], foreground: { ok: true, name: 'BeamNG.drive.x64', fullscreen: true, desktop: false }, visibleNow: true, keys: 'Shift+` — скрыть/показать · Ctrl+Shift+O — режим мыши', hotkeys: 'Shift+` — оверлей', exclusiveFullscreenNote: 'в эксклюзивном полноэкранном режиме оверлей скрыт' }); },
       overlaySet: (patch) => { overlayCalls.push('set:' + JSON.stringify(patch)); return Promise.resolve({ enabled: !!(patch && patch.enabled), interactive: !!(patch && patch.interactive) }); },
       setBadge: () => {},
       onUpdate: () => () => {}
@@ -86,11 +86,11 @@ function check(name, cond, extra) {
 
 await sleep(150);
 const ws = sockets[0];
-check('версия клиента 1.11.0', window.APP_VERSION === '1.11.0' || $('body').textContent.includes('1.11.0'), 'APP_VERSION');
+check('версия клиента 1.12.0', window.APP_VERSION === '1.12.0' || $('body').textContent.includes('1.12.0'), 'APP_VERSION');
 ws.open();
 
 ws.push({
-  t: 'hello', version: '1.11.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
+  t: 'hello', version: '1.12.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
   me: { name: 'anna', color: '#5865f2', profile: { displayName: 'Анна', avatarUrl: '' }, status: 'online', settings: { status: 'online' } },
   channels: ['obshiy'],
   channelItems: [{ room: 'obshiy', title: 'obshiy', owner: 'anna', ownerKey: 'anna', mine: true, count: 1, members: [{ name: 'anna', displayName: 'Анна', online: true }] }],
@@ -279,7 +279,7 @@ if (voiceTabBtn) {
     check('режим «нажми и говори» уходит на сервер', !!pttSent, JSON.stringify(ws.sent.filter((m) => m.t === 'settings_update').slice(-2)));
   }
 }
-// --- оверлей в десктоп-оболочке (1.11.0) -----------------------------------
+// --- оверлей в десктоп-оболочке (1.12.0) -----------------------------------
 if (window.messengerDesktop && window.messengerDesktop.overlaySupported) {
   const voiceTab2 = doc.querySelector('[data-tab="voice"]');
   if (voiceTab2) {
@@ -290,6 +290,32 @@ if (window.messengerDesktop && window.messengerDesktop.overlaySupported) {
     const ovSwitches = [...doc.querySelectorAll('#settingsBody .switch')];
     check('переключатель оверлея показан', ovSwitches.length > 0, 'switches=' + ovSwitches.length);
     check('подсказка про горячие клавиши оверлея', ovText.includes('Shift+`'), ovText.slice(-200));
+    check('принцип Discord: переключатель «Только поверх игр»', ovText.includes('Только поверх игр'));
+    check('настройка угла панели', ovText.includes('Угол панели'));
+    check('настройка размера панели', ovText.includes('Размер панели'));
+    check('видно активное приложение', ovText.includes('BeamNG.drive.x64'), ovText.slice(-260));
+    const ovAppRow = [...doc.querySelectorAll('#settingsBody .ov-app-row')];
+    check('список приложений оверлея отрисован', ovAppRow.length === 1 && ovAppRow[0].textContent.includes('notepad'), 'rows=' + ovAppRow.length);
+    if (ovAppRow.length) {
+      const beforeCalls = overlayCalls.length;
+      ovAppRow[0].querySelector('button').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+      await sleep(150);
+      check('приложение убирается из списка', overlayCalls.slice(beforeCalls).some((c) => c.includes('removeApp')), overlayCalls.slice(beforeCalls).join('|'));
+    }
+    const ovRange = [...doc.querySelectorAll('#settingsBody input[type="range"]')].pop();
+    if (ovRange) {
+      ovRange.value = '120';
+      ovRange.dispatchEvent(new window.Event('input', { bubbles: true }));
+      await sleep(150);
+      check('размер панели сохраняется', overlayCalls.some((c) => c.includes('"scale":120')), overlayCalls.slice(-3).join('|'));
+    }
+    const ovSelect = [...doc.querySelectorAll('#settingsBody select')].pop();
+    if (ovSelect) {
+      ovSelect.value = 'br';
+      ovSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+      await sleep(150);
+      check('угол панели сохраняется', overlayCalls.some((c) => c.includes('"corner":"br"')), overlayCalls.slice(-3).join('|'));
+    }
     const callsBefore = overlayCalls.length;
     const ovBtn = [...doc.querySelectorAll('#settingsBody button')].find((b) => (b.textContent || '').includes('Режим мыши'));
     if (ovBtn) {
@@ -346,7 +372,7 @@ if (accountTabBtn) {
   accountTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await sleep(60);
   const bodyText = ($('#settingsBody') ? $('#settingsBody').textContent : '') || '';
-  check('в аккаунте видна версия', /1\.11\.\d+/.test(bodyText), bodyText.slice(0, 200));
+  check('в аккаунте видна версия', /1\.12\.\d+/.test(bodyText), bodyText.slice(0, 200));
   const passInputs = [...doc.querySelectorAll('#settingsBody input[type="password"]')];
   check('три поля для смены пароля', passInputs.length >= 3, 'inputs=' + passInputs.length);
   if (passInputs.length >= 3) {

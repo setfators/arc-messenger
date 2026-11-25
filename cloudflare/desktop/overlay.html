@@ -28,7 +28,8 @@
 
   /* ---------- панель звонка ---------- */
   #ovPanel {
-    position: fixed; left: 18px; top: 18px; width: 296px;
+    position: fixed; width: 296px;
+    zoom: var(--ov-scale, 1);
     background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
     box-shadow: 0 18px 42px rgba(0, 0, 0, .55);
     backdrop-filter: blur(10px);
@@ -38,6 +39,12 @@
     pointer-events: none;
   }
   #ovPanel.ov-hidden { opacity: 0; transform: translateY(-10px) scale(.97); }
+
+  /* Угол панели — как в настройках оверлея Discord. */
+  body.corner-tl #ovPanel { left: 18px; top: 18px; }
+  body.corner-tr #ovPanel { right: 18px; top: 18px; }
+  body.corner-bl #ovPanel { left: 18px; bottom: 18px; }
+  body.corner-br #ovPanel { right: 18px; bottom: 18px; }
   body.interactive #ovPanel {
     border-color: var(--accent);
     box-shadow: 0 18px 42px rgba(0, 0, 0, .55), 0 0 0 1px var(--accent);
@@ -191,13 +198,13 @@
         list.textContent = '';
         return;
       }
-      const signature = people.map((one) => one.name + '|' + one.muted + '|' + one.screen).join(';');
+      const signature = people.map((one) => one.name + '|' + one.muted + '|' + one.speaking + '|' + one.screen).join(';');
       if (list.dataset.sig !== signature) {
         list.dataset.sig = signature;
         list.textContent = '';
         for (const one of people) {
           const row = document.createElement('div');
-          row.className = 'ov-row' + (one.muted ? ' muted' : ' speaking');
+          row.className = 'ov-row' + (one.muted ? ' muted' : '') + (one.speaking ? ' speaking' : '');
           const ava = document.createElement('span');
           ava.className = 'ov-ava';
           ava.textContent = initial(one.name);
@@ -252,10 +259,20 @@
       hint.textContent = on ? 'Esc — выйти из режима мыши' : 'Shift+` — скрыть';
     }
 
+    function applyConfig(cfg) {
+      const data = cfg || {};
+      const corner = ['tl', 'tr', 'bl', 'br'].includes(data.corner) ? data.corner : 'tl';
+      document.body.classList.remove('corner-tl', 'corner-tr', 'corner-bl', 'corner-br');
+      document.body.classList.add('corner-' + corner);
+      const scale = Math.min(140, Math.max(80, Number(data.scale) || 100));
+      document.documentElement.style.setProperty('--ov-scale', String(scale / 100));
+    }
+
     if (api) {
       api.onState(renderState);
       api.onToast(renderToast);
       api.onMode(setInteractive);
+      if (api.onConfig) api.onConfig(applyConfig);
       api.ready();
     }
     micBtn.addEventListener('click', () => { if (api) api.toggleMic(); });

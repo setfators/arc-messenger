@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('arcOverlay', {
     ipcRenderer.on('overlay:mode', handler);
     return () => ipcRenderer.removeListener('overlay:mode', handler);
   },
+  onConfig: (cb) => {
+    const handler = (_event, cfg) => { try { cb(cfg || {}); } catch (e) {} };
+    ipcRenderer.on('overlay:config', handler);
+    return () => ipcRenderer.removeListener('overlay:config', handler);
+  },
   toggleMic: () => ipcRenderer.send('overlay:mic-toggle'),
   exitInteractive: () => ipcRenderer.send('overlay:interactive', false),
   ready: () => ipcRenderer.send('overlay:ready')

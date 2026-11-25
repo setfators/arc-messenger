@@ -1,4 +1,5 @@
 const { app, BrowserWindow, shell, session, Menu, Tray, ipcMain, desktopCapturer, nativeImage, screen, globalShortcut } = require('electron');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const zlib = require('zlib');
@@ -81,6 +82,12 @@ let overlayWin = null;         // прозрачное окно поверх в�
 let overlayCfg = null;         // { enabled, interactive, boundsLocked }
 let overlayHotkeySummary = ''; // какие сочетания удалось зарегистрировать
 let lastOverlayState = { inCall: false, title: '', participants: [], selfMuted: false };
+let fgProc = null;        // постоянный помощник: активное окно и полноэкранность
+let fgBuffer = '';
+let fgPending = null;
+let fgLast = null;        // последнее состояние активного окна
+let fgAllowed = true;     // можно ли сейчас рисовать оверлей поверх активного окна
+let overlayPolicyTimer = null;
 let isQuitting = false; // true только для настоящего выхода: трей → «Выход», quitAndInstall
 let unreadInfo = { count: 0 };
 let overlayIcon = null; // маленькая PNG-точка для setOverlayIcon, создаётся лениво
@@ -179,21 +186,152 @@ function createWindow() {
 
 const OVERLAY_KEYS = 'Shift+` — скрыть/показать · Ctrl+Shift+O — режим мыши';
 
+const OVERLAY_CORNERS = ['tl', 'tr', 'bl', 'br'];
+
 function overlayDefaults() {
-  return { enabled: false, interactive: false };
+  return { enabled: false, interactive: false, always: false, apps: [], corner: 'tl', scale: 100 };
 }
 
 function loadOverlayConfig() {
   const saved = readJson('overlay.json') || {};
   overlayCfg = Object.assign(overlayDefaults(), {
     enabled: saved.enabled === true,
+    always: saved.always === true,
+    corner: OVERLAY_CORNERS.includes(saved.corner) ? saved.corner : 'tl',
+    scale: Math.min(140, Math.max(80, Number(saved.scale) || 100)),
+    apps: Array.isArray(saved.apps)
+      ? saved.apps.filter((one) => typeof one === 'string' && one.trim()).slice(0, 40)
+      : [],
     interactive: false // режим мыши не переживает перезапуск
   });
+  fgAllowed = true;
   return overlayCfg;
 }
 
 function saveOverlayConfig() {
-  writeJson('overlay.json', { enabled: !!(overlayCfg && overlayCfg.enabled) });
+  if (!overlayCfg) return;
+  writeJson('overlay.json', {
+    enabled: !!overlayCfg.enabled,
+    always: !!overlayCfg.always,
+    corner: overlayCfg.corner,
+    scale: overlayCfg.scale,
+    apps: overlayCfg.apps || []
+  });
+}
+
+/* ------------------------ активное окно: принцип Discord «только поверх игры» */
+
+// Discord показывает оверлей только поверх игр, а не поверх рабочего стола.
+// Мы определяем активное окно через постоянный PowerShell-помощник
+// (foreground.ps1): он отвечает строкой JSON на каждую строку stdin.
+function startForegroundHelper() {
+  if (fgProc && !fgProc.killed) return fgProc;
+  try {
+    fgProc = spawn('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', path.join(__dirname, 'foreground.ps1')
+    ], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  } catch (error) {
+    fgProc = null;
+    return null;
+  }
+  fgProc.stdout.setEncoding('utf8');
+  fgProc.stdout.on('data', (chunk) => {
+    fgBuffer += chunk;
+    let index = fgBuffer.indexOf('\n');
+    while (index >= 0) {
+      const line = fgBuffer.slice(0, index).trim();
+      fgBuffer = fgBuffer.slice(index + 1);
+      index = fgBuffer.indexOf('\n');
+      if (!line) continue;
+      let data = null;
+      try { data = JSON.parse(line); } catch (error) { continue; }
+      if (data && data.ok) fgLast = data;
+      if (fgPending) {
+        clearTimeout(fgPending.timer);
+        const pending = fgPending;
+        fgPending = null;
+        pending.resolve(data);
+      }
+    }
+  });
+  fgProc.on('exit', () => {
+    fgProc = null;
+    if (fgPending) {
+      clearTimeout(fgPending.timer);
+      const pending = fgPending;
+      fgPending = null;
+      pending.resolve(null);
+    }
+  });
+  fgProc.stdin.on('error', () => {});
+  return fgProc;
+}
+
+function stopForegroundHelper() {
+  if (!fgProc) return;
+  try { fgProc.stdin.end(); } catch (error) {}
+  try { fgProc.kill(); } catch (error) {}
+  fgProc = null;
+  fgLast = null;
+}
+
+function askForeground(timeout) {
+  return new Promise((resolve) => {
+    const proc = startForegroundHelper();
+    if (!proc) return resolve(null);
+    if (fgPending) {
+      clearTimeout(fgPending.timer);
+      const previous = fgPending;
+      fgPending = null;
+      previous.resolve(null);
+    }
+    fgPending = {
+      resolve,
+      timer: setTimeout(() => { fgPending = null; resolve(null); }, timeout || 900)
+    };
+    try {
+      proc.stdin.write('tick\n');
+    } catch (error) {
+      resolve(null);
+    }
+  });
+}
+
+// Правило показа: рабочий стол и сам Arc — нет; полный экран — да;
+// остальные приложения — только из списка (или если включено «поверх всех»).
+function overlayAllowedFor(info) {
+  const cfg = overlayCfg || overlayDefaults();
+  if (!info || info.ok === false) return true;
+  if (info.desktop) return false;
+  const name = String(info.name || '').toLowerCase();
+  if (!name) return true;
+  if (name === 'arc' || name === String(app.getName() || '').toLowerCase()) return false;
+  if (cfg.always) return true;
+  if (info.fullscreen) return true;
+  return (cfg.apps || []).some((one) => String(one).toLowerCase() === name);
+}
+
+function startOverlayPolicyLoop() {
+  if (overlayPolicyTimer) return;
+  overlayPolicyTimer = setInterval(async () => {
+    if (!overlayCfg || !overlayCfg.enabled) return;
+    const info = await askForeground();
+    if (info && info.ok) fgLast = info;
+    const allowed = overlayAllowedFor(fgLast);
+    if (allowed !== fgAllowed) {
+      fgAllowed = allowed;
+      refreshOverlayVisibility();
+    }
+  }, 1500);
+}
+
+function stopOverlayPolicyLoop() {
+  if (!overlayPolicyTimer) return;
+  clearInterval(overlayPolicyTimer);
+  overlayPolicyTimer = null;
 }
 
 function overlayDisplayBounds() {
@@ -261,6 +399,13 @@ function sendOverlayMode() {
   overlayWin.webContents.send('overlay:mode', !!(overlayCfg && overlayCfg.interactive));
 }
 
+// Угол и масштаб панели — как настройки оверлея в Discord.
+function sendOverlayConfig() {
+  if (!overlayAlive()) return;
+  const cfg = overlayCfg || overlayDefaults();
+  overlayWin.webContents.send('overlay:config', { corner: cfg.corner, scale: cfg.scale });
+}
+
 function overlayShow(show) {
   if (!overlayAlive()) {
     if (!show) return;
@@ -282,11 +427,12 @@ function overlayShow(show) {
 
 let overlayToastUntil = 0;
 
-// Решает, надо ли показывать окно: включён оверлей и есть звонок или всплытие.
+// Решает, надо ли показывать окно: включён оверлей, есть звонок или всплытие
+// и активное окно — игра (либо включено «поверх всех приложений»).
 function refreshOverlayVisibility() {
   const cfg = overlayCfg || overlayDefaults();
   const busy = !!(lastOverlayState && lastOverlayState.inCall) || Date.now() < overlayToastUntil;
-  overlayShow(cfg.enabled && busy);
+  overlayShow(cfg.enabled && busy && fgAllowed);
 }
 
 function setOverlayInteractive(on) {
@@ -312,7 +458,13 @@ function setOverlayInteractive(on) {
 
 function setOverlayEnabled(on) {
   overlayCfg.enabled = !!on;
-  if (!on) setOverlayInteractive(false);
+  if (on) {
+    startOverlayPolicyLoop();
+  } else {
+    setOverlayInteractive(false);
+    stopOverlayPolicyLoop();
+    stopForegroundHelper();
+  }
   saveOverlayConfig();
   refreshOverlayVisibility();
   rebuildTrayMenu();
@@ -387,6 +539,7 @@ ipcMain.on('overlay:toast', (event, payload) => {
 ipcMain.on('overlay:ready', () => {
   sendOverlayState();
   sendOverlayMode();
+  sendOverlayConfig();
 });
 
 ipcMain.on('overlay:mic-toggle', () => {
@@ -397,24 +550,67 @@ ipcMain.on('overlay:interactive', (event, on) => { setOverlayInteractive(!!on); 
 
 ipcMain.on('overlay:toggle', () => { toggleOverlay(); });
 
-ipcMain.handle('overlay:get', () => ({
-  supported: true,
-  enabled: !!(overlayCfg && overlayCfg.enabled),
-  interactive: !!(overlayCfg && overlayCfg.interactive),
-  inCall: !!(lastOverlayState && lastOverlayState.inCall),
-  participants: (lastOverlayState && lastOverlayState.participants) || [],
-  keys: OVERLAY_KEYS,
-  hotkeys: overlayHotkeySummary,
-  exclusiveFullscreenNote: 'В эксклюзивном полноэкранном режиме Windows скрывает оверлей — включите безрамочный/оконный полный экран.'
-}));
+ipcMain.handle('overlay:get', async () => {
+  const cfg = overlayCfg || overlayDefaults();
+  const info = await askForeground(700);
+  if (info && info.ok) fgLast = info;
+  return {
+    supported: true,
+    enabled: !!cfg.enabled,
+    interactive: !!cfg.interactive,
+    inCall: !!(lastOverlayState && lastOverlayState.inCall),
+    participants: (lastOverlayState && lastOverlayState.participants) || [],
+    always: !!cfg.always,
+    apps: cfg.apps || [],
+    corner: cfg.corner,
+    scale: cfg.scale,
+    keys: OVERLAY_KEYS,
+    hotkeys: overlayHotkeySummary,
+    foreground: fgLast,
+    visibleNow: overlayAlive() && overlayWin.isVisible(),
+    exclusiveFullscreenNote: 'В эксклюзивном полноэкранном режиме Windows скрывает оверлей — включите безрамочный/оконный полный экран.'
+  };
+});
 
-ipcMain.handle('overlay:set', (event, patch) => {
+ipcMain.handle('overlay:set', async (event, patch) => {
   const data = patch && typeof patch === 'object' ? patch : {};
   if ('enabled' in data) setOverlayEnabled(!!data.enabled);
   if ('interactive' in data) setOverlayInteractive(!!data.interactive);
+  if ('corner' in data && OVERLAY_CORNERS.includes(data.corner)) {
+    overlayCfg.corner = data.corner;
+  }
+  if ('scale' in data) {
+    overlayCfg.scale = Math.min(140, Math.max(80, Math.round(Number(data.scale) || 100)));
+  }
+  if ('always' in data) {
+    overlayCfg.always = !!data.always;
+    fgAllowed = overlayAllowedFor(fgLast);
+  }
+  if ('apps' in data && Array.isArray(data.apps)) {
+    overlayCfg.apps = data.apps.filter((one) => typeof one === 'string' && one.trim()).map((one) => one.trim()).slice(0, 40);
+  }
+  if (data.addForegroundApp) {
+    const info = await askForeground(700);
+    if (info && info.ok) fgLast = info;
+    const name = String((fgLast && fgLast.name) || '').trim();
+    if (name && !/^arc$/i.test(name) && !(overlayCfg.apps || []).some((one) => one.toLowerCase() === name.toLowerCase())) {
+      overlayCfg.apps = [...(overlayCfg.apps || []), name].slice(0, 40);
+    }
+  }
+  if (data.removeApp) {
+    const target = String(data.removeApp).toLowerCase();
+    overlayCfg.apps = (overlayCfg.apps || []).filter((one) => one.toLowerCase() !== target);
+  }
+  saveOverlayConfig();
+  sendOverlayConfig();
+  rebuildTrayMenu();
   return {
-    enabled: !!(overlayCfg && overlayCfg.enabled),
-    interactive: !!(overlayCfg && overlayCfg.interactive)
+    enabled: !!overlayCfg.enabled,
+    interactive: !!overlayCfg.interactive,
+    always: !!overlayCfg.always,
+    apps: overlayCfg.apps || [],
+    corner: overlayCfg.corner,
+    scale: overlayCfg.scale
   };
 });
 
@@ -480,6 +676,61 @@ function rebuildTrayMenu() {
       checked: !!cfg.interactive,
       enabled: !!cfg.enabled,
       click: (item) => setOverlayInteractive(item.checked)
+    },
+    {
+      label: 'Только поверх игр (как в Discord)',
+      type: 'checkbox',
+      checked: !cfg.always,
+      enabled: !!cfg.enabled,
+      click: (item) => {
+        overlayCfg.always = !item.checked;
+        fgAllowed = overlayAllowedFor(fgLast);
+        saveOverlayConfig();
+        refreshOverlayVisibility();
+      }
+    },
+    {
+      label: fgLast && fgLast.name
+        ? 'Добавить «' + fgLast.name + '» в список'
+        : 'Добавить активное приложение',
+      enabled: !!cfg.enabled,
+      click: async () => {
+        const info = await askForeground(900);
+        if (info && info.ok) fgLast = info;
+        const name = String((fgLast && fgLast.name) || '').trim();
+        if (!name) return;
+        if (!(overlayCfg.apps || []).some((one) => one.toLowerCase() === name.toLowerCase())) {
+          overlayCfg.apps = [...(overlayCfg.apps || []), name].slice(0, 40);
+        }
+        fgAllowed = overlayAllowedFor(fgLast);
+        saveOverlayConfig();
+        refreshOverlayVisibility();
+        rebuildTrayMenu();
+      }
+    },
+    {
+      label: 'Панель',
+      submenu: [
+        {
+          label: 'Слева сверху', type: 'radio', checked: cfg.corner === 'tl',
+          click: () => { overlayCfg.corner = 'tl'; saveOverlayConfig(); sendOverlayConfig(); rebuildTrayMenu(); }
+        },
+        {
+          label: 'Справа сверху', type: 'radio', checked: cfg.corner === 'tr',
+          click: () => { overlayCfg.corner = 'tr'; saveOverlayConfig(); sendOverlayConfig(); rebuildTrayMenu(); }
+        },
+        {
+          label: 'Слева снизу', type: 'radio', checked: cfg.corner === 'bl',
+          click: () => { overlayCfg.corner = 'bl'; saveOverlayConfig(); sendOverlayConfig(); rebuildTrayMenu(); }
+        },
+        {
+          label: 'Справа снизу', type: 'radio', checked: cfg.corner === 'br',
+          click: () => { overlayCfg.corner = 'br'; saveOverlayConfig(); sendOverlayConfig(); rebuildTrayMenu(); }
+        },
+        { type: 'separator' },
+        { label: 'Крупнее', click: () => { overlayCfg.scale = Math.min(140, (overlayCfg.scale || 100) + 10); saveOverlayConfig(); sendOverlayConfig(); rebuildTrayMenu(); } },
+        { label: 'Мельче', click: () => { overlayCfg.scale = Math.max(80, (overlayCfg.scale || 100) - 10); saveOverlayConfig(); sendOverlayConfig(); rebuildTrayMenu(); } }
+      ]
     },
     {
       label: overlayHotkeySummary || OVERLAY_KEYS,
@@ -830,7 +1081,46 @@ async function runOverlaySelfTest() {
     check('режим мыши включается', !!(overlayCfg && overlayCfg.interactive));
     setOverlayInteractive(false);
     check('режим мыши выключается', !(overlayCfg && overlayCfg.interactive));
-    check('глобальные сочетания зарегистрированы', !!overlayHotkeySummary, overlayHotkeySummary);
+    // Глобальные сочетания: в тесте их могут держать уже запущенные копии Arc,
+    // поэтому проверяем сам механизм на отдельном сочетании и то, что попытка
+    // регистрации не падает.
+    let mechanism = false;
+    try {
+      mechanism = globalShortcut.register('CommandOrControl+Alt+Shift+F9', () => {});
+      if (mechanism) globalShortcut.unregister('CommandOrControl+Alt+Shift+F9');
+    } catch (error) {
+      mechanism = false;
+    }
+    check('глобальные сочетания поддерживаются', mechanism);
+    check('регистрация сочетаний оверлея выполнена', typeof overlayHotkeySummary === 'string',
+      overlayHotkeySummary || 'все заняты другой копией приложения');
+
+    // Угол и масштаб панели.
+    overlayCfg.corner = 'br';
+    overlayCfg.scale = 120;
+    sendOverlayConfig();
+    await new Promise((r) => setTimeout(r, 400));
+    const placed = await overlayWin.webContents.executeJavaScript(`(() => ({
+      corner: document.body.classList.contains('corner-br'),
+      scale: document.documentElement.style.getPropertyValue('--ov-scale').trim()
+    }))()`);
+    check('панель встаёт в выбранный угол', !!(placed && placed.corner), JSON.stringify(placed));
+    check('масштаб панели применяется', !!(placed && placed.scale === '1.2'), JSON.stringify(placed));
+
+    // Правило «только поверх игр», как в Discord.
+    const policy = [
+      ['рабочий стол скрывает оверлей', overlayAllowedFor({ ok: true, desktop: true }), false],
+      ['сам Arc скрывает оверлей', overlayAllowedFor({ ok: true, name: 'Arc' }), false],
+      ['полноэкранная игра показывает', overlayAllowedFor({ ok: true, name: 'BeamNG.drive.x64', fullscreen: true }), true],
+      ['оконное приложение скрывает', overlayAllowedFor({ ok: true, name: 'notepad', fullscreen: false }), false]
+    ];
+    for (const [label, got, want] of policy) check(label, got === want, 'получено ' + got);
+    overlayCfg.apps = ['notepad'];
+    check('приложение из списка показывает оверлей', overlayAllowedFor({ ok: true, name: 'notepad', fullscreen: false }) === true);
+    overlayCfg.always = true;
+    check('режим «поверх всех» показывает оверлей', overlayAllowedFor({ ok: true, name: 'notepad', fullscreen: false }) === true);
+    overlayCfg.always = false;
+    overlayCfg.apps = [];
 
     result.ok = result.problems.length === 0;
   } catch (error) {

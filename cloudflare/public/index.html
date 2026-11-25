@@ -865,6 +865,9 @@
   .scr-tile, .screen-cell { animation: tileIn var(--t2) var(--ease-out) both; }
   .screen-stage:not(.hidden) { animation: fadeIn var(--t2) var(--ease-out); }
   .vtile { transition: transform var(--t2) var(--ease), box-shadow var(--t2) var(--ease); }
+  /* Кто говорит (1.12.0): зелёная подсветка плитки, как в Discord. */
+  .vtile.speaking { box-shadow: 0 0 0 2px var(--ok), 0 8px 22px rgba(0, 0, 0, .35); }
+  .vtile.speaking .vava, .vtile.speaking .ava, .vtile.speaking > .avatar { box-shadow: 0 0 0 3px rgba(59, 165, 93, .85); }
   .vtile:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0,0,0,.35); }
 
   /* Кнопка «вниз / новые сообщения» (1.9.0). */
@@ -887,7 +890,14 @@
     .jump-down { right: 12px; bottom: 88px; }
   }
 
-  /* ---------- бинды 1.10.0 ---------- */
+  /* Список приложений оверлея (1.12.0). */
+  .ov-apps { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+  .ov-app-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 5px 8px; font-size: 12px;
+  }
+  .ov-app-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* ---------- бинды 1.10.0 ---------- */
   .bind-btn {
     min-width: 210px; padding: 8px 12px; border-radius: 9px; cursor: pointer;
     background: var(--panel2); color: var(--text); border: 1px solid var(--line);
@@ -947,7 +957,7 @@
   </nav>
 
   <aside class="side" id="side">
-    <div class="side-head" id="sideTitle">Каналы</div>
+    <div class="side-head">Каналы</div>
     <div class="side-scroll">
       <div class="side-label">Личные сообщения</div>
       <div id="dmList"></div>
@@ -1058,7 +1068,7 @@
       <button type="button" class="cbtn" id="attachBtn" title="Отправить картинку">📎</button>
       <button type="button" class="cbtn" id="emojiBtn" title="Эмодзи и стикеры">🙂</button>
       <input id="text" placeholder="Сообщение…" autocomplete="off" maxlength="4000">
-      <button class="primary" id="send" type="submit">→</button>
+      <button class="primary" type="submit">→</button>
       <input type="file" id="mediaFile" class="hidden">
     </form>
   </main>
@@ -1219,7 +1229,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -3545,6 +3555,71 @@ function rtcIceServers() {
   return list;
 }
 
+/* ------------------------- уровень голоса: подсветка «кто говорит» 1.12.0 */
+// Анализируем звук каждого собеседника через WebAudio: у кого сейчас громко —
+// тот подсвечивается зелёным. Этим же пользуется оверлей поверх игр.
+let voiceCtx = null;
+const voiceLevels = new Map(); // имя -> { analyser, buf, source }
+function ensureVoiceCtx() {
+  if (voiceCtx) {
+    if (voiceCtx.state === 'suspended') voiceCtx.resume().catch(() => {});
+    return voiceCtx;
+  }
+  try {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    voiceCtx = Ctor ? new Ctor() : null;
+    if (voiceCtx && voiceCtx.state === 'suspended') voiceCtx.resume().catch(() => {});
+  } catch (error) {
+    voiceCtx = null;
+  }
+  return voiceCtx;
+}
+function watchVoiceLevel(name, stream) {
+  if (!name || !stream || voiceLevels.has(name)) return;
+  const ctx = ensureVoiceCtx();
+  if (!ctx) return;
+  try {
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    voiceLevels.set(name, { analyser, source, buf: new Uint8Array(analyser.fftSize) });
+  } catch (error) {}
+}
+function forgetVoiceLevel(name) {
+  const item = voiceLevels.get(name);
+  if (!item) return;
+  try { item.source.disconnect(); } catch (error) {}
+  voiceLevels.delete(name);
+}
+function levelOf(analyser, buf) {
+  analyser.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i += 1) {
+    const value = (buf[i] - 128) / 128;
+    sum += value * value;
+  }
+  return Math.sqrt(sum / buf.length);
+}
+function applySpeakingMarks(names) {
+  for (const tile of document.querySelectorAll('#callGrid .vtile')) {
+    tile.classList.toggle('speaking', names.has(tile.dataset.name || ''));
+  }
+}
+setInterval(voiceLevelTick, 160);
+function voiceLevelTick() {
+  if (!voiceLevels.size && !store.selfSpeaking) return;
+  const speaking = new Set();
+  for (const [name, item] of voiceLevels) {
+    if (levelOf(item.analyser, item.buf) > 0.02) speaking.add(name);
+  }
+  if (store.selfSpeaking && store.me) speaking.add(store.me.name);
+  const changed = !store.speaking || store.speaking.size !== speaking.size
+    || [...speaking].some((one) => !store.speaking.has(one));
+  store.speaking = speaking;
+  if (changed) applySpeakingMarks(speaking);
+}
+
 function createPeer(name) {
   const pc = new RTCPeerConnection({ iceServers: rtcIceServers(), bundlePolicy: 'max-bundle' });
   const peer = { pc, name, pending: [], audio: null, audios: [], screenStream: null, makingOffer: false, ignoreOffer: false };
@@ -3585,11 +3660,14 @@ function createPeer(name) {
     audio.play().catch(() => {});
     peer.audios.push(audio);
     if (!peer.audio) peer.audio = audio;
+    // Уровень голоса для подсветки «кто говорит» и оверлея.
+    watchVoiceLevel(name, event.streams[0] || new MediaStream([event.track]));
   };
   return peer;
 }
 
 function closePeer(name) {
+  forgetVoiceLevel(name);
   const peer = store.peers.get(name);
   if (!peer) return;
   try { peer.pc.close(); } catch {}
@@ -3853,6 +3931,8 @@ function micGateTick() {
   } catch (error) {
     micGainNode.gain.value = target;
   }
+  // Свой голос тоже подсвечиваем: оверлей показывает «говорите вы».
+  store.selfSpeaking = !store.muted && db >= micThresholdDb() && db > -55;
 }
 function applySettings(next) {
   store.settings = Object.assign(settingsDefaults(), store.settings || {}, next || {});
@@ -4520,32 +4600,99 @@ function tabVoice(body) {
   sectKeys.appendChild(el('p', 'install-note', 'Бинды работают, когда фокус не в поле ввода. Esc закрывает окна и панели.'));
   body.appendChild(sectKeys);
 
-  // Оверлей поверх игр — только в десктоп-оболочке (1.11.0).
+  // Оверлей поверх игр — только в десктоп-оболочке (1.12.0).
+  // Принцип Discord: оверлей виден поверх игр, а не поверх рабочего стола.
   const desktop = window.messengerDesktop;
   if (desktop && desktop.overlaySupported) {
     const sectOv = el('div', 'sect');
     sectOv.appendChild(el('h4', '', 'Оверлей поверх игр'));
-    sectOv.appendChild(el('p', 'install-note', 'Панель звонка и всплывающие сообщения поверх игры. Работает в безрамочном или оконном полном экране; в эксклюзивном полноэкранном режиме Windows скрывает оверлей.'));
-    const ovSwitch = addSwitch(sectOv, 'Показывать оверлей', 'Появляется во время звонка и при новых сообщениях', false, (v) => {
-      desktop.overlaySet({ enabled: v });
+    sectOv.appendChild(el('p', 'install-note', 'Панель звонка и уведомления поверх игры — как в Discord. Показывается только поверх игр и приложений из списка; на рабочем столе и в самом Arc скрыт. В эксклюзивном полноэкранном режиме Windows оверлей не виден — включите безрамочный или оконный полный экран.'));
+
+    const ovState = { enabled: false, always: false, corner: 'tl', scale: 100, apps: [], interactive: false };
+
+    const ovSwitch = addSwitch(sectOv, 'Показывать оверлей', 'Во время звонка и при новых сообщениях', false, (v) => {
+      desktop.overlaySet({ enabled: v }).then(() => refreshOverlayUi());
     });
+    const ovGames = addSwitch(sectOv, 'Только поверх игр', 'Как в Discord: на рабочем столе оверлей не мешает', true, (v) => {
+      desktop.overlaySet({ always: !v }).then(() => refreshOverlayUi());
+    });
+    addSelect(sectOv, 'Угол панели', 'Где показывать панель звонка', [
+      ['tl', 'Слева сверху'], ['tr', 'Справа сверху'], ['bl', 'Слева снизу'], ['br', 'Справа снизу']
+    ], 'tl', (v) => {
+      desktop.overlaySet({ corner: v });
+    });
+    addRange(sectOv, 'Размер панели', 'Крупнее или мельче, как в настройках оверлея', 80, 140, 5, 100, '%', (v) => {
+      desktop.overlaySet({ scale: v });
+    });
+
+    const ovDetected = el('p', 'install-note', 'Сейчас активное окно не определено.');
+    sectOv.appendChild(ovDetected);
+    const ovAdd = el('button', 'pill', 'Добавить активное приложение в список');
+    ovAdd.type = 'button';
+    ovAdd.style.marginTop = '6px';
+    ovAdd.onclick = () => {
+      desktop.overlaySet({ addForegroundApp: true }).then(() => refreshOverlayUi());
+    };
+    sectOv.appendChild(ovAdd);
+
+    const ovAppsBox = el('div', 'ov-apps');
+    sectOv.appendChild(ovAppsBox);
     const ovKeys = el('p', 'install-note', '');
     sectOv.appendChild(ovKeys);
-    const ovInfo = el('p', 'install-note', '');
-    sectOv.appendChild(ovInfo);
-    if (typeof desktop.overlayGet === 'function') {
+    const ovNote = el('p', 'install-note', '');
+    sectOv.appendChild(ovNote);
+
+    function renderOverlayApps() {
+      ovAppsBox.textContent = '';
+      const apps = ovState.apps || [];
+      if (!apps.length) {
+        ovAppsBox.appendChild(el('p', 'install-note', 'Список пуст: показываем оверлей только поверх полноэкранных игр.'));
+        return;
+      }
+      for (const name of apps) {
+        const row = el('div', 'ov-app-row');
+        row.appendChild(el('span', 'ov-app-name', name));
+        const del = el('button', 'pill', 'Убрать');
+        del.type = 'button';
+        del.onclick = () => {
+          desktop.overlaySet({ removeApp: name }).then(() => refreshOverlayUi());
+        };
+        row.appendChild(del);
+        ovAppsBox.appendChild(row);
+      }
+    }
+
+    function refreshOverlayUi() {
+      if (typeof desktop.overlayGet !== 'function') return;
       Promise.resolve(desktop.overlayGet()).then((state) => {
         const data = state || {};
-        ovSwitch.classList.toggle('on', !!data.enabled);
-        ovKeys.textContent = data.keys || '';
-        ovInfo.textContent = data.exclusiveFullscreenNote || '';
+        ovState.enabled = !!data.enabled;
+        ovState.always = !!data.always;
+        ovState.corner = data.corner || 'tl';
+        ovState.scale = Number(data.scale) || 100;
+        ovState.apps = Array.isArray(data.apps) ? data.apps : [];
+        ovSwitch.classList.toggle('on', ovState.enabled);
+        ovGames.classList.toggle('on', !ovState.always);
+        ovKeys.textContent = (data.keys || '') + (data.hotkeys ? ' · ' + data.hotkeys : '');
+        ovNote.textContent = data.exclusiveFullscreenNote || '';
+        const fg = data.foreground;
+        if (fg && fg.ok) {
+          ovDetected.textContent = fg.desktop
+            ? 'Сейчас активно: рабочий стол — оверлей скрыт.'
+            : 'Сейчас активно: ' + (fg.name || 'окно') + (fg.fullscreen ? ' (полный экран)' : ' (окно)')
+              + ' — ' + (data.visibleNow ? 'оверлей показан' : 'оверлей скрыт');
+        } else {
+          ovDetected.textContent = 'Активное окно не определено.';
+        }
+        renderOverlayApps();
       }).catch(() => {});
     }
+    refreshOverlayUi();
+
     const ovMode = el('button', 'pill', 'Режим мыши в оверлее');
     ovMode.type = 'button';
     ovMode.style.marginTop = '8px';
     ovMode.onclick = () => {
-      if (typeof desktop.overlaySet !== 'function') return;
       Promise.resolve(desktop.overlayGet()).then((state) => {
         const next = !(state && state.interactive);
         return desktop.overlaySet({ interactive: next, enabled: next ? true : (state && state.enabled) });
@@ -4555,6 +4702,7 @@ function tabVoice(body) {
     body.appendChild(sectOv);
   }
 }
+
 /* --------------------------------------------------- бинды (1.10.0) */
 // Запись бинда: ждём клавишу или боковую кнопку мыши. Esc отменяет,
 // модификатор в одиночку биндом не считается.
@@ -4878,7 +5026,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.11.0.apk');
+  apkLink.setAttribute('download', 'Arc-1.12.0.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';
@@ -6963,6 +7111,8 @@ function renderCall() {
   grid.innerHTML = '';
   for (const u of users) {
     const tile = el('div', 'vtile');
+    tile.dataset.name = u.name;
+    if (store.speaking && store.speaking.has(u.name)) tile.classList.add('speaking');
     tile.appendChild(avatar(u.name));
     const name = el('div', 'vname', u.name + (store.me && u.name === store.me.name ? ' (вы)' : ''));
     tile.appendChild(name);

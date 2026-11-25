@@ -264,7 +264,7 @@ C.send({ t: 'settings_update', settings: { animations: true } });
 const animOn = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.animations === true, 2000, 'animations on');
 check('анимации можно включить обратно', !!animOn, JSON.stringify(animOn && animOn.settings && animOn.settings.animations));
 
-// Бинды (1.11.0): клавиша и боковая кнопка мыши сохраняются, мусор отбрасывается.
+// Бинды (1.12.0): клавиша и боковая кнопка мыши сохраняются, мусор отбрасывается.
 C.send({ t: 'settings_update', settings: { binds: { ptt: 'Mouse4', search: 'Ctrl+Shift+KeyF' } } });
 const bindsOk = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.binds
   && m.settings.binds.ptt === 'Mouse4' && m.settings.binds.search === 'Ctrl+Shift+KeyF', 2500, 'binds');
@@ -323,7 +323,7 @@ if (toDelete) {
 }
 
 // --- версия 1.4.0: реакции, ответы, картинки, поиск, push --------------------
-check('hello знает версию 1.10.x', !!(helloA && /^1\.11\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
+check('hello знает версию 1.10.x', !!(helloA && /^1\.12\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
 check('hello отдаёт VAPID-ключ', !!(helloA && typeof helloA.pushKey === 'string' && helloA.pushKey.length > 40),
   helloA && String(helloA.pushKey).slice(0, 20));
 

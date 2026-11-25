@@ -52,14 +52,8 @@ contextBridge.exposeInMainWorld('messengerDesktop', {
   // Оверлей поверх игр (1.11.0): состояние звонка собирается из DOM и уходит
   // в основной процесс, а он рисует его в отдельном прозрачном окне.
   overlaySupported: true,
-  overlayToggle: () => ipcRenderer.send('overlay:toggle'),
   overlayGet: () => ipcRenderer.invoke('overlay:get'),
-  overlaySet: (patch) => ipcRenderer.invoke('overlay:set', patch),
-  onOverlay: (cb) => {
-    const handler = (_e, payload) => cb(payload);
-    ipcRenderer.on('overlay:changed', handler);
-    return () => ipcRenderer.removeListener('overlay:changed', handler);
-  }
+  overlaySet: (patch) => ipcRenderer.invoke('overlay:set', patch)
 });
 
 /* ------------------------------------------------------- оверлей поверх игр */
@@ -78,6 +72,7 @@ function readOverlayState() {
     participants.push({
       name: nameNode ? nameNode.textContent || '' : '',
       muted: stateText.includes('выключ'),
+      speaking: tile.classList.contains('speaking'),
       screen: !!tile.querySelector('.vscreen')
     });
   }

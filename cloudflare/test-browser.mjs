@@ -326,7 +326,7 @@ try {
   check('канал удалён из списка',
     await waitFor(`![...document.querySelectorAll('#channels .nm')].some((n) => n.textContent.includes(${JSON.stringify(chanTitle)}))`));
 
-  // 10. Бинды: запись боковой кнопки мыши и её срабатывание (1.11.0).
+  // 10. Бинды: запись боковой кнопки мыши и её срабатывание (1.12.0).
   await evaluate("document.querySelector('#navSettings').click()");
   await waitFor("!document.querySelector('#settingsModal').classList.contains('hidden')");
   await evaluate("document.querySelector('[data-tab=\"binds\"]').click()");
