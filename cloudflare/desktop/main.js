@@ -74,6 +74,12 @@ function appHost() {
   try { return new URL(APP_URL).host; } catch (e) { return ''; }
 }
 
+// Сквозной тест оверлея: настоящий голосовой канал без физического микрофона.
+if (process.argv.includes('--overlay-e2e')) {
+  app.commandLine.appendSwitch('use-fake-device-for-media-stream');
+  app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
+}
+
 app.setAppUserModelId('ru.messenger.desktop');
 
 let mainWindow = null;
@@ -188,6 +194,17 @@ const OVERLAY_KEYS = 'Shift+` — скрыть/показать · Ctrl+Shift+O 
 
 const OVERLAY_CORNERS = ['tl', 'tr', 'bl', 'br'];
 
+// Журнал оверлея: пишем в userData/overlay.log, чтобы можно было разобраться,
+// почему панель не появилась, не запуская отладчик.
+let overlayLogFile = null;
+function overlayLog(message) {
+  try {
+    if (!overlayLogFile) overlayLogFile = path.join(app.getPath('userData'), 'overlay.log');
+    const line = new Date().toISOString() + ' ' + message + '\n';
+    fs.appendFileSync(overlayLogFile, line, 'utf8');
+  } catch (error) {}
+}
+
 function overlayDefaults() {
   return { enabled: false, interactive: false, always: false, apps: [], corner: 'tl', scale: 100 };
 }
@@ -227,16 +244,26 @@ function saveOverlayConfig() {
 function startForegroundHelper() {
   if (fgProc && !fgProc.killed) return fgProc;
   try {
+    // Внутри app.asar сторонний процесс не прочитает файл, поэтому помощник
+    // лежит рядом с ресурсами (extraResources) и берётся из process.resourcesPath.
+    const scriptPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'foreground.ps1')
+      : path.join(__dirname, 'foreground.ps1');
     fgProc = spawn('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
       '-ExecutionPolicy', 'Bypass',
-      '-File', path.join(__dirname, 'foreground.ps1')
+      '-File', scriptPath
     ], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
   } catch (error) {
     fgProc = null;
     return null;
   }
+  // Без обработчика 'error' неудачный запуск убивает главный процесс.
+  fgProc.on('error', (error) => {
+    overlayLog('foreground spawn error: ' + String((error && error.message) || error));
+    fgProc = null;
+  });
   fgProc.stdout.setEncoding('utf8');
   fgProc.stdout.on('data', (chunk) => {
     fgBuffer += chunk;
@@ -323,6 +350,7 @@ function startOverlayPolicyLoop() {
     const allowed = overlayAllowedFor(fgLast);
     if (allowed !== fgAllowed) {
       fgAllowed = allowed;
+      overlayLog('policy: ' + (fgLast ? fgLast.name + ' fullscreen=' + fgLast.fullscreen : 'нет данных') + ' allowed=' + allowed);
       refreshOverlayVisibility();
     }
   }, 1500);
@@ -377,6 +405,10 @@ function createOverlay() {
   overlayWin.setIgnoreMouseEvents(true, { forward: true });
   overlayWin.setContentProtection(false);
   overlayWin.loadFile(path.join(__dirname, 'overlay.html'));
+  overlayLog('create: ' + JSON.stringify(overlayWin.getBounds()) + ' packaged=' + app.isPackaged);
+  overlayWin.webContents.on('console-message', (event, level, message) => overlayLog('page: ' + message));
+  overlayWin.webContents.on('did-fail-load', (event, code, desc) => overlayLog('load fail: ' + code + ' ' + desc));
+  overlayWin.on('show', () => overlayLog('shown'));
   overlayWin.webContents.on('did-finish-load', () => {
     sendOverlayState();
     sendOverlayMode();
@@ -416,16 +448,23 @@ function overlayShow(show) {
     if (show) {
       if (!overlayWin.isVisible()) {
         overlayWin.showInactive();
+        overlayLog('show: bounds=' + JSON.stringify(overlayWin.getBounds())
+          + ' visible=' + overlayWin.isVisible() + ' onTop=' + overlayWin.isAlwaysOnTop());
         sendOverlayState();
         sendOverlayMode();
+        sendOverlayConfig();
       }
     } else if (overlayWin.isVisible()) {
       overlayWin.hide();
+      overlayLog('hide');
     }
-  } catch (e) {}
+  } catch (e) {
+    overlayLog('show error: ' + String((e && e.message) || e));
+  }
 }
 
 let overlayToastUntil = 0;
+let lastPageStateAt = 0; // когда приложение само присылало состояние звонка
 
 // Решает, надо ли показывать окно: включён оверлей, есть звонок или всплытие
 // и активное окно — игра (либо включено «поверх всех приложений»).
@@ -528,6 +567,14 @@ function registerOverlayHotkeys() {
 
 ipcMain.on('overlay:state', (event, state) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  // Пока приложение присылает точное состояние, гадание по DOM не используем.
+  if (Date.now() - lastPageStateAt < 5000) return;
+  handleOverlayState(state);
+});
+
+ipcMain.on('overlay:state-page', (event, state) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  lastPageStateAt = Date.now();
   handleOverlayState(state);
 });
 
@@ -1008,6 +1055,152 @@ ipcMain.handle('update:install', () => {
   return false;
 });
 
+/* ------------------------------------- демонстрация оверлея на живой игре */
+
+// --overlay-demo: включает оверлей, рисует «звонок» и остаётся в этом
+// состоянии, чтобы можно было проверить его поверх настоящей игры.
+async function runOverlayDemo() {
+  overlayCfg = { enabled: true, interactive: false, always: true, apps: [], corner: 'tr', scale: 100 };
+  fgAllowed = true;
+  createOverlay();
+  await new Promise((resolve) => {
+    if (overlayAlive() && !overlayWin.webContents.isLoading()) return resolve();
+    if (overlayAlive()) overlayWin.webContents.once('did-finish-load', resolve);
+    setTimeout(resolve, 6000);
+  });
+  handleOverlayState({
+    inCall: true,
+    title: 'Голос · демонстрация',
+    participants: [
+      { name: 'Анна', muted: false, speaking: true, screen: false },
+      { name: 'Борис', muted: true, speaking: false, screen: true },
+      { name: 'Вы', muted: false, speaking: false, screen: false }
+    ],
+    selfMuted: false
+  });
+  overlayShow(true);
+  setInterval(async () => {
+    const info = await askForeground();
+    if (info) fgLast = info;
+    overlayLog('demo: ' + JSON.stringify(fgLast) + ' visible=' + (overlayAlive() ? overlayWin.isVisible() : 'нет окна'));
+  }, 2000);
+  setTimeout(() => {
+    overlayLog('demo done');
+    isQuitting = true;
+    app.exit(0);
+  }, 60000);
+}
+/* ------------------------ сквозная проверка оверлея на настоящем сайте */
+
+// --overlay-e2e: заходит на боевой сайт, создаёт временный аккаунт, входит
+// в голосовой канал (микрофон подменён) и проверяет, что оверлей появился
+// сам, без открытия окна звонка. Это ровно та ситуация, где он не работал.
+async function runOverlayE2E() {
+  const result = { ok: false, checks: [], problems: [] };
+  const check = (name, cond, extra) => {
+    result.checks.push({ name, ok: !!cond, extra: extra === undefined ? '' : String(extra) });
+    if (!cond) result.problems.push(name + (extra ? ': ' + extra : ''));
+  };
+  const stamp = Date.now().toString(36);
+  const name = 'ov' + stamp;
+  const pass = 'parol123';
+  const evalIn = async (code) => {
+    try {
+      return await mainWindow.webContents.executeJavaScript('(' + code + ')');
+    } catch (error) {
+      return { error: String((error && error.message) || error) };
+    }
+  };
+  const waitFor = async (code, ms) => {
+    const deadline = Date.now() + (ms || 20000);
+    while (Date.now() < deadline) {
+      const value = await evalIn(code);
+      if (value) return true;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return false;
+  };
+  try {
+    overlayCfg = { enabled: true, interactive: false, always: true, apps: [], corner: 'tr', scale: 100 };
+    fgAllowed = true;
+    startOverlayPolicyLoop();
+
+    await new Promise((resolve) => {
+      if (mainWindow && !mainWindow.webContents.isLoading()) return resolve();
+      if (mainWindow) mainWindow.webContents.once('did-finish-load', resolve);
+      setTimeout(resolve, 15000);
+    });
+    check('приложение загрузило сайт', await waitFor("!!document.getElementById('auth')", 15000));
+
+    const reg = await evalIn(`(async () => {
+      const res = await fetch('/api/register', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: ${JSON.stringify(name)}, password: ${JSON.stringify(pass)} })
+      });
+      const data = await res.json().catch(() => null);
+      if (data && data.token) localStorage.setItem('token', data.token);
+      return { status: res.status, token: !!(data && data.token) };
+    })()`);
+    check('временный аккаунт создан', !!(reg && reg.token), JSON.stringify(reg));
+    await mainWindow.webContents.reload();
+    check('вход выполнен', await waitFor("!document.getElementById('app').classList.contains('hidden')", 20000));
+    check('виден демо-канал', await waitFor("document.querySelectorAll('#channels .chan').length > 0"));
+
+    // Заходим в канал и жмём «войти в голосовой канал».
+    await evalIn("document.querySelector('#channels .chan').click(); true");
+    await new Promise((r) => setTimeout(r, 800));
+    const joined = await evalIn(`(() => {
+      const mic = document.querySelector('#channels .chan .mic');
+      if (!mic) return false;
+      mic.click();
+      return true;
+    })()`);
+    check('кнопка входа в голос найден', joined);
+    check('приложение вошло в голосовой канал',
+      await waitFor("!!window.desktopOverlayState && window.desktopOverlayState().inCall === true", 20000));
+    const state = await evalIn("window.desktopOverlayState ? window.desktopOverlayState() : null");
+    check('состояние звонка содержит участников',
+      !!(state && state.participants && state.participants.length >= 1), JSON.stringify(state && state.participants));
+    check('окно звонка НЕ открыто (это и было причиной)',
+      await evalIn("document.getElementById('callStage').classList.contains('hidden')"));
+    await new Promise((r) => setTimeout(r, 1500));
+    check('окно оверлея видно', overlayAlive() && overlayWin.isVisible(),
+      overlayAlive() ? String(overlayWin.isVisible()) : 'нет окна');
+    const panel = await (overlayAlive()
+      ? overlayWin.webContents.executeJavaScript(
+        "(() => { const p = document.getElementById('ovPanel'); return { hidden: p.classList.contains('ov-hidden'), rows: document.querySelectorAll('#ovList .ov-row').length, title: document.getElementById('ovTitle').textContent }; })()"
+      )
+      : Promise.resolve(null));
+    check('панель оверлея раскрыта', !!(panel && panel.hidden === false), JSON.stringify(panel));
+    check('в панели есть участник', !!(panel && panel.rows >= 1), JSON.stringify(panel));
+
+    // Убираем за собой: выходим из голоса и удаляем аккаунт.
+    await evalIn(`(async () => {
+      const token = localStorage.getItem('token') || '';
+      if (!token) return 'нет токена';
+      return await new Promise((resolve) => {
+        const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?token=' + encodeURIComponent(token));
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.t === 'hello') {
+            ws.send(JSON.stringify({ t: 'voice_leave' }));
+            setTimeout(() => ws.send(JSON.stringify({ t: 'account_delete', password: ${JSON.stringify(pass)} })), 300);
+          }
+          if (data.t === 'account_deleted') { resolve('удалён'); ws.close(); }
+        };
+        ws.onerror = () => resolve('ошибка ws');
+        setTimeout(() => resolve('таймаут'), 8000);
+      });
+    })()`);
+    result.ok = result.problems.length === 0;
+  } catch (error) {
+    result.problems.push('исключение: ' + String((error && error.message) || error));
+  }
+  console.log('OVERLAY_E2E ' + JSON.stringify(result));
+  isQuitting = true;
+  setTimeout(() => app.exit(result.ok ? 0 : 1), 500);
+}
+
 /* ------------------------------------------------- самопроверка оверлея */
 
 // Запускается флагом --overlay-test: создаёт окно оверлея, проверяет его
@@ -1063,6 +1256,7 @@ async function runOverlaySelfTest() {
       };
     })()`);
     check('панель показывается в звонке', view && view.hidden === false);
+    check('канал состояния от приложения подключён', ipcMain.listenerCount('overlay:state-page') > 0);
     check('заголовок канала передан', view && view.title.includes('проверка'), view && view.title);
     check('участники отрисованы', view && view.rows === 2, view && view.rows);
     check('выключенный микрофон помечен', view && view.muted === 1, view && view.muted);
@@ -1187,6 +1381,9 @@ if (!gotLock) {
     createWindow();
     buildTray();
     registerOverlayHotkeys();
+    // Если оверлей был включён в прошлый раз, наблюдение за активным окном
+    // должно начаться сразу, а не только после переключения галочки.
+    if (overlayCfg && overlayCfg.enabled) startOverlayPolicyLoop();
 
     // Оверлей должен следовать за основным экраном и не мешать играм.
     screen.on('display-metrics-changed', syncOverlayBounds);
@@ -1195,6 +1392,14 @@ if (!gotLock) {
 
     if (process.argv.includes('--overlay-test')) {
       runOverlaySelfTest();
+      return;
+    }
+    if (process.argv.includes('--overlay-demo')) {
+      runOverlayDemo();
+      return;
+    }
+    if (process.argv.includes('--overlay-e2e')) {
+      runOverlayE2E();
       return;
     }
 

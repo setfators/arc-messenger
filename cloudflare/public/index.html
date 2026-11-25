@@ -411,7 +411,10 @@
   .avatar-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .avatar-preview { width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; font-size: 30px; font-weight: 700; color: #fff; flex: 0 0 74px; }
   .avatar-set { display: flex; gap: 6px; flex-wrap: wrap; max-width: 300px; }
-  .avatar-set button { width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel2); font-size: 17px; line-height: 1; }
+  /* padding: 0 — иначе базовое правило кнопок (8px 12px) распирает плитку 36×36:
+     значок и подпись «АБ» вылезали за границы (баг 1.12.1). */
+  .avatar-set button { width: 36px; height: 36px; padding: 0; border-radius: 9px; border: 1px solid var(--line); background: var(--panel2); font-size: 18px; line-height: 1; display: grid; place-items: center; }
+  .avatar-set button.avatar-initials { font-size: 12px; font-weight: 700; letter-spacing: .02em; }
   .avatar-set button.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
   .range { display: flex; align-items: center; gap: 10px; }
   .range input[type=range] { width: 190px; accent-color: var(--accent); }
@@ -472,7 +475,7 @@
   .sticker-cell { position: relative; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 6px; text-align: center; }
   .sticker-cell img { width: 100%; height: 80px; object-fit: contain; display: block; }
   .sticker-name { font-size: 11px; color: var(--muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sticker-del { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,.6); color: #fff; border: 0; border-radius: 50%; width: 20px; height: 20px; font-size: 11px; cursor: pointer; }
+  .sticker-del { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,.6); color: #fff; border: 0; border-radius: 50%; width: 20px; height: 20px; padding: 0; font-size: 11px; line-height: 1; cursor: pointer; display: grid; place-items: center; }
   .msg .sticker-img { max-width: 160px; max-height: 160px; border-radius: 10px; display: block; margin-top: 2px; }
   .ava img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
   .avatar-preview.has-img { background: var(--panel2); overflow: hidden; padding: 0; }
@@ -1229,7 +1232,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.12.1';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -3394,6 +3397,7 @@ async function ensureMic() {
 }
 
 async function joinVoice(room) {
+  setTimeout(pushDesktopOverlay, 0);
   if (!window.RTCPeerConnection) { toast('Браузер не поддерживает голосовой чат'); return; }
   // Сначала выходим из прошлой комнаты: leaveVoice останавливает микрофон,
   // поэтому вызывать его после ensureMic нельзя — иначе в новом канале
@@ -3416,6 +3420,7 @@ async function joinVoice(room) {
 }
 
 function leaveVoice(silent) {
+  setTimeout(pushDesktopOverlay, 0);
   if (!store.voiceRoom) {
     // Иногда интерфейс уже «вышел», а сервер ещё считает иначе: всё равно
     // отправляем voice_leave, чтобы не застрять в голосе.
@@ -3607,6 +3612,7 @@ function applySpeakingMarks(names) {
   }
 }
 setInterval(voiceLevelTick, 160);
+setInterval(pushDesktopOverlay, 1000);
 function voiceLevelTick() {
   if (!voiceLevels.size && !store.selfSpeaking) return;
   const speaking = new Set();
@@ -3617,7 +3623,10 @@ function voiceLevelTick() {
   const changed = !store.speaking || store.speaking.size !== speaking.size
     || [...speaking].some((one) => !store.speaking.has(one));
   store.speaking = speaking;
-  if (changed) applySpeakingMarks(speaking);
+  if (changed) {
+    applySpeakingMarks(speaking);
+    pushDesktopOverlay();
+  }
 }
 
 function createPeer(name) {
@@ -3749,6 +3758,7 @@ async function handleRtc(data) {
 $('micBtn').onclick = () => {
   const track = store.localStream && store.localStream.getAudioTracks()[0];
   store.muted = !store.muted;
+  setTimeout(pushDesktopOverlay, 0);
   if (track) track.enabled = !store.muted;
   send({ t: 'voice_mute', muted: store.muted });
   renderVoiceBox();
@@ -4187,7 +4197,8 @@ function tabProfile(body) {
   row.appendChild(preview);
   const set = el('div', 'avatar-set');
   AVATAR_SET.forEach((ico) => {
-    const btn = el('button', ico === p.avatar ? 'active' : '', ico || 'АБ');
+    // Класс avatar-initials уменьшает шрифт подписи «АБ», иначе две буквы не влезают.
+    const btn = el('button', (ico === p.avatar ? 'active' : '') + (ico ? '' : ' avatar-initials'), ico || 'АБ');
     btn.type = 'button';
     btn.title = ico ? 'Значок ' + ico : 'Первые буквы имени';
     btn.onclick = () => {
@@ -5026,7 +5037,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.12.0.apk');
+  apkLink.setAttribute('download', 'Arc-1.12.1.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';
@@ -7064,6 +7075,38 @@ function renderScreenArea(sources, refs) {
       renderCall();
     };
   }
+}
+
+/* --------------- состояние звонка для оверлея в оболочке (1.12.1) --------------- */
+// Приложение знает, кто в канале и кто говорит, поэтому отдаёт это оболочке
+// напрямую: окно звонка (#callStage) может быть и не открыто, а оверлей должен
+// работать всегда, когда человек в голосовом канале или в личном звонке.
+function desktopOverlayState() {
+  const users = Array.isArray(store.voiceUsers) ? store.voiceUsers : [];
+  const speaking = store.speaking || new Set();
+  const meName = store.me && store.me.name;
+  let title = '';
+  if (store.voiceRoom) {
+    const dm = dmPartnersOf(store.voiceRoom);
+    title = dm ? 'Звонок · ' + displayNameOf(callPeerName(store.voiceRoom)) : 'Голос · ' + channelTitleOf(store.voiceRoom);
+  }
+  return {
+    inCall: !!store.voiceRoom,
+    title,
+    selfMuted: !!store.muted,
+    participants: users.map((u) => ({
+      name: u.name,
+      muted: !!u.muted,
+      speaking: speaking.has(u.name) || (u.name === meName && !!store.selfSpeaking),
+      screen: !!u.screen
+    }))
+  };
+}
+
+function pushDesktopOverlay() {
+  const desktop = window.messengerDesktop;
+  if (!desktop || typeof desktop.overlayState !== 'function') return;
+  try { desktop.overlayState(desktopOverlayState()); } catch (error) {}
 }
 
 function renderCall() {

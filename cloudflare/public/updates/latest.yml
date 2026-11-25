@@ -1,8 +1,8 @@
-version: 1.12.0
+version: 1.12.1
 files:
-  - url: Arc-Setup-1.12.0.exe
-    sha512: AjhXWKttH7C2g3Fo3CjpM6CLNEtIcOIImHXRcfQugk5X5FC+GSWkDBZLoF3G3G7+q32Qdrt761g5+B1TN3zvdA==
-    size: 121667631
-path: Arc-Setup-1.12.0.exe
-sha512: AjhXWKttH7C2g3Fo3CjpM6CLNEtIcOIImHXRcfQugk5X5FC+GSWkDBZLoF3G3G7+q32Qdrt761g5+B1TN3zvdA==
-releaseDate: '2026-11-25T12:21:58.271Z'
+  - url: Arc-Setup-1.12.1.exe
+    sha512: WDnM52ecDakkoYL0AUhL8zarNYwC2g7uJW3XDayFsF3DkrweZWvmQCNuXMKDJtdhuVl0znBYwI1IkqmSMEGdMw==
+    size: 121670315
+path: Arc-Setup-1.12.1.exe
+sha512: WDnM52ecDakkoYL0AUhL8zarNYwC2g7uJW3XDayFsF3DkrweZWvmQCNuXMKDJtdhuVl0znBYwI1IkqmSMEGdMw==
+releaseDate: '2026-11-25T12:51:27.991Z'

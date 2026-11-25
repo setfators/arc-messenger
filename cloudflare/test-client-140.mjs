@@ -20,6 +20,7 @@ class FakeWS {
 }
 
 const overlayCalls = [];
+const overlayStates = [];
 
 const dom = new JSDOM(html, {
   url: 'https://example.test/',
@@ -46,6 +47,7 @@ const dom = new JSDOM(html, {
       overlayToggle: () => overlayCalls.push('toggle'),
       overlayGet: () => { overlayCalls.push('get'); return Promise.resolve({ enabled: true, interactive: false, always: false, corner: 'tl', scale: 100, apps: ['notepad'], foreground: { ok: true, name: 'BeamNG.drive.x64', fullscreen: true, desktop: false }, visibleNow: true, keys: 'Shift+` — скрыть/показать · Ctrl+Shift+O — режим мыши', hotkeys: 'Shift+` — оверлей', exclusiveFullscreenNote: 'в эксклюзивном полноэкранном режиме оверлей скрыт' }); },
       overlaySet: (patch) => { overlayCalls.push('set:' + JSON.stringify(patch)); return Promise.resolve({ enabled: !!(patch && patch.enabled), interactive: !!(patch && patch.interactive) }); },
+      overlayState: (state) => { overlayStates.push(state); },
       setBadge: () => {},
       onUpdate: () => () => {}
     };
@@ -327,6 +329,21 @@ if (window.messengerDesktop && window.messengerDesktop.overlaySupported) {
 }
 
 // --- вкладка «Бинды»: запись клавиши и боковой кнопки мыши -----------------
+
+// --- состояние звонка уходит в оболочку без открытия окна звонка --------
+if (typeof window.pushDesktopOverlay === 'function') {
+  overlayStates.length = 0;
+  ws.push({ t: 'voice_state', room: 'obshiy', limit: 8, users: [ { name: 'anna', muted: false }, { name: 'boris', muted: true, screen: true } ] });
+  await sleep(120);
+  window.pushDesktopOverlay();
+  await sleep(120);
+  const voiceState = overlayStates[overlayStates.length - 1] || null;
+  check('оверлей получает состояние звонка', !!(voiceState && voiceState.inCall === true), JSON.stringify(voiceState));
+  check('переданы участники звонка', !!(voiceState && voiceState.participants && voiceState.participants.length === 2), JSON.stringify(voiceState && voiceState.participants));
+  check('передан выключенный микрофон', !!(voiceState && voiceState.participants.some((one) => one.muted)), '');
+  check('передан показ экрана', !!(voiceState && voiceState.participants.some((one) => one.screen)), '');
+}
+
 const bindsTabBtn = doc.querySelector('[data-tab="binds"]');
 check('вкладка «Бинды» есть', !!bindsTabBtn, [...doc.querySelectorAll('.settings-nav button')].map((b) => b.textContent).join('|'));
 if (bindsTabBtn) {

@@ -13,7 +13,7 @@ check('в клиенте есть функция tabModeration', page.includes('
 check('в клиенте обрабатывается staff_list', page.includes("case 'staff_list'"), '');
 check('в клиенте обрабатывается role_changed', page.includes("case 'role_changed'"), '');
 check('сотрудник может удалять чужие сообщения', page.includes('m.author === store.me.name || store.isStaff'), '');
-check('версия клиента 1.12.0', page.includes("APP_VERSION = '1.12.0'"), '');
+check('версия клиента', /APP_VERSION = '\d+\.\d+\.\d+'/.test(page), '');
 
 // Сервер: preflight и запрет экспорта без токена.
 const opt = await fetch(B + '/api/export', { method: 'OPTIONS', headers: { origin: 'https://localhost' } });

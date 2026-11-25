@@ -53,7 +53,18 @@ contextBridge.exposeInMainWorld('messengerDesktop', {
   // в основной процесс, а он рисует его в отдельном прозрачном окне.
   overlaySupported: true,
   overlayGet: () => ipcRenderer.invoke('overlay:get'),
-  overlaySet: (patch) => ipcRenderer.invoke('overlay:set', patch)
+  overlaySet: (patch) => ipcRenderer.invoke('overlay:set', patch),
+  // Состояние звонка отдаёт само приложение: оно знает про голосовой канал
+  // точно, а окно звонка (#callStage) может быть и не открыто.
+  overlayState: (state) => {
+    const data = state && typeof state === 'object' ? state : {};
+    ipcRenderer.send('overlay:state-page', {
+      inCall: !!data.inCall,
+      title: String(data.title || '').slice(0, 80),
+      selfMuted: !!data.selfMuted,
+      participants: Array.isArray(data.participants) ? data.participants.slice(0, 20) : []
+    });
+  }
 });
 
 /* ------------------------------------------------------- оверлей поверх игр */
