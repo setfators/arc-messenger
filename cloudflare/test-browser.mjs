@@ -245,7 +245,88 @@ try {
   check('вкладка «Внешний вид» содержит настройку плавности',
     await waitFor("[...document.querySelectorAll('#settingsBody .field')].some((f) => f.textContent.includes('Плавные анимации'))"));
 
-  // 9. Адаптив: мобильная ширина переключает раскладку.
+  // 9. Реальные сценарии интерфейса: канал, панель, поиск, звонок, тема.
+  await evaluate("document.querySelector('#settingsClose').click()");
+  await sleep(200);
+
+  // 9.1. Создание канала через диалог.
+  await evaluate("document.querySelector('#newChannel').click()");
+  check('диалог создания канала открылся', await waitFor("!document.querySelector('#dlgBack').classList.contains('hidden')"));
+  const chanTitle = 'проверка-' + stamp;
+  await evaluate(`(() => {
+    const input = document.querySelector('#dlgInput');
+    input.value = ${JSON.stringify(chanTitle)};
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#dlgOk').click();
+    return true;
+  })()`);
+  check('канал создан и появился в списке',
+    await waitFor(`[...document.querySelectorAll('#channels .nm')].some((n) => n.textContent.includes(${JSON.stringify(chanTitle)}))`));
+
+  // 9.2. Панель канала: участники и ссылка-приглашение.
+  await evaluate("document.querySelector('#chanMembers').click()");
+  check('панель канала открылась', await waitFor("!document.querySelector('#chanModal').classList.contains('hidden')"));
+  check('в панели есть участник', await waitFor("document.querySelectorAll('#chanMembersList .crow').length >= 1"));
+  const link = await evaluate("document.querySelector('#chanLink').value");
+  check('ссылка-приглашение сформирована', typeof link === 'string' && link.includes('?join='), String(link));
+  await evaluate("document.querySelector('#chanClose').click()");
+  await sleep(150);
+
+  // 9.3. Поиск по Ctrl+K и закрытие по Esc.
+  await evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true }))");
+  check('поиск открывается по Ctrl+K', await waitFor("!document.querySelector('#searchPane').classList.contains('hidden')"));
+  await evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }))");
+  check('поиск закрывается по Esc', await waitFor("document.querySelector('#searchPane').classList.contains('hidden')"));
+
+  // 9.4. Окно звонка: область экранов скрыта, пока никто не показывает.
+  await evaluate('window.showCall()');
+  check('окно звонка открывается', await waitFor("!document.querySelector('#callStage').classList.contains('hidden')"));
+  const screens = await evaluate(`(() => ({
+    stage: document.querySelector('#screenStage').classList.contains('hidden'),
+    split: document.querySelector('#screenSplit').classList.contains('hidden'),
+    all: document.querySelector('#callAllScreens').classList.contains('hidden'),
+  }))()`);
+  check('без демонстраций экраны спрятаны', !!(screens && screens.stage && screens.split && screens.all), JSON.stringify(screens));
+  await evaluate('window.hideCall()');
+  await sleep(120);
+
+  // 9.5. Смена темы применяется к документу.
+  await evaluate("document.querySelector('#navSettings').click()");
+  await waitFor("!document.querySelector('#settingsModal').classList.contains('hidden')");
+  await evaluate("document.querySelector('[data-tab=\"appearance\"]').click()");
+  await sleep(200);
+  await evaluate(`(() => {
+    const chip = [...document.querySelectorAll('#settingsBody .chip')].find((c) => c.textContent.trim() === 'Светлая');
+    if (chip) chip.click();
+    return !!chip;
+  })()`);
+  check('светлая тема применяется', await waitFor("document.documentElement.dataset.theme === 'light'"));
+  await evaluate(`(() => {
+    const chip = [...document.querySelectorAll('#settingsBody .chip')].find((c) => c.textContent.trim() === 'Тёмная');
+    if (chip) chip.click();
+    return true;
+  })()`);
+  await sleep(200);
+  check('тёмная тема возвращается', (await evaluate("document.documentElement.dataset.theme")) === 'dark');
+  await evaluate("document.querySelector('#settingsClose').click()");
+  await sleep(150);
+
+  // 9.6. Удаление созданного канала через панель.
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll('#channels .chan')].find((n) => n.textContent.includes(${JSON.stringify(chanTitle)}));
+    if (row) row.click();
+    return !!row;
+  })()`);
+  await sleep(400);
+  await evaluate("document.querySelector('#chanMembers').click()");
+  await waitFor("!document.querySelector('#chanModal').classList.contains('hidden')");
+  await evaluate("document.querySelector('#chanDelete').click()");
+  check('подтверждение удаления канала показано', await waitFor("!document.querySelector('#dlgBack').classList.contains('hidden')"));
+  await evaluate("document.querySelector('#dlgOk').click()");
+  check('канал удалён из списка',
+    await waitFor(`![...document.querySelectorAll('#channels .nm')].some((n) => n.textContent.includes(${JSON.stringify(chanTitle)}))`));
+
+  // 10. Адаптив: мобильная ширина переключает раскладку.
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await sleep(400);
   const mobile = await evaluate(`(() => {
