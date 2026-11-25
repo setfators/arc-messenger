@@ -19,6 +19,13 @@
   :root {
     --bg: #1b1c20; --panel: #23252b; --panel2: #2b2d34; --line: #35383f;
     --text: #e8eaed; --muted: #9aa0ab; --accent: #5865f2; --ok: #3ba55d; --danger: #ed4245;
+    /* Плавность (1.9.0): единые кривые и длительности для всего интерфейса. */
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --ease-out: cubic-bezier(.16, 1, .3, 1);
+    --spring: cubic-bezier(.34, 1.42, .64, 1);
+    --t1: 110ms;
+    --t2: 170ms;
+    --t3: 260ms;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; overflow: hidden; }
@@ -256,13 +263,13 @@
     position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
     background: #000; border: 1px solid var(--line); color: #fff; padding: 10px 16px;
     border-radius: 10px; font-size: 13px; opacity: 0; pointer-events: none;
-    transition: opacity .2s; z-index: 40; max-width: 80vw;
+    transition: opacity var(--t2) var(--ease); z-index: 40; max-width: 80vw;
   }
   .toast.show { opacity: .95; }
 
   @media (max-width: 760px) {
     .app { grid-template-columns: 60px 1fr; }
-    .side { position: fixed; left: 60px; top: 0; bottom: 0; width: 240px; z-index: 10; transform: translateX(-120%); transition: transform .2s; }
+    .side { position: fixed; left: 60px; top: 0; bottom: 0; width: 240px; z-index: 10; transform: translateX(-120%); transition: transform var(--t3) var(--ease-out), box-shadow var(--t3) var(--ease); }
     .side.open { transform: none; }
   }
 
@@ -280,7 +287,7 @@
   .chan .del {
     display: grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px;
     border-radius: 5px; border: none; background: transparent; color: var(--muted);
-    font-size: 12px; line-height: 1; opacity: 0; transition: opacity .12s, background .12s;
+    font-size: 12px; line-height: 1; opacity: 0; transition: opacity var(--t1) var(--ease), background var(--t1) var(--ease);
   }
   .chan:hover .del { opacity: 1; }
   .chan.active .del { opacity: .7; }
@@ -392,8 +399,8 @@
   }
   .field input[type=text]:focus, .field input[type=password]:focus, .field textarea:focus, .field select:focus { border-color: var(--accent); }
   .field textarea { min-height: 66px; resize: vertical; width: 100%; }
-  .switch { width: 44px; height: 24px; border-radius: 999px; background: var(--line); border: none; position: relative; flex: 0 0 44px; padding: 0; transition: background .15s; }
-  .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch { width: 44px; height: 24px; border-radius: 999px; background: var(--line); border: none; position: relative; flex: 0 0 44px; padding: 0; transition: background var(--t1) var(--ease); }
+  .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform var(--t2) var(--spring); }
   .switch.on { background: var(--ok); }
   .switch.on::after { transform: translateX(20px); }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -418,7 +425,7 @@
   .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
   .typing {
     height: 0; overflow: hidden; color: var(--muted); font-size: 12px;
-    padding: 0 18px; transition: height .15s;
+    padding: 0 18px; transition: height var(--t2) var(--ease);
   }
   .typing.on { height: 20px; }
   @media (max-width: 760px) {
@@ -551,7 +558,7 @@
   .src-empty { padding: 18px; text-align: center; opacity: .7; font-size: 13px; }
   .upd-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .upd-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; width: 200px; }
-  .upd-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .upd-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width var(--t2) var(--ease); }
   .upd-note { font-size: 12px; opacity: .75; }
 
 /* Управление: коды приглашений */
@@ -573,17 +580,17 @@
   /* инструменты сообщения: «+» реакция, «Ответить», удаление */
   .msg .msg-tools {
     position: absolute; top: 2px; right: 6px; display: flex; gap: 4px; z-index: 3;
-    opacity: 0; transition: opacity .12s;
+    opacity: 0; transition: opacity var(--t1) var(--ease);
   }
   .msg:hover .msg-tools, .msg .msg-tools:focus-within { opacity: 1; }
   .msg .msg-tools button {
     border-radius: 6px; border: 1px solid var(--line); background: var(--panel2);
     color: var(--muted); font-size: 11px; line-height: 1; padding: 4px 7px; min-height: 22px;
-    transition: border-color .12s, color .12s;
+    transition: border-color var(--t1) var(--ease), color var(--t1) var(--ease);
   }
   .msg .msg-tools .del-msg:hover { border-color: var(--danger); color: #ff9a9c; }
   .msg .msg-tools .reply-btn:hover, .msg .msg-tools .rx-add:hover { border-color: var(--accent); color: var(--text); }
-  .msg.flash { background: rgba(88,101,242,.18); border-radius: 8px; transition: background .25s; }
+  .msg.flash { background: rgba(88,101,242,.18); border-radius: 8px; }
   .msg .who {
     background: none; border: none; padding: 0; font: inherit; font-weight: 600;
     text-align: left; cursor: pointer;
@@ -805,8 +812,95 @@
     .call-head { padding: 8px 12px; }
     .settings { height: calc(var(--vh, 1vh) * 100 - 10px); height: calc(100dvh - 10px); }
   }
+  /* ======================= плавные анимации 1.9.0 ======================= */
+  @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes popIn { from { opacity: 0; transform: translateY(10px) scale(.985) } to { opacity: 1; transform: none } }
+  @keyframes dropIn { from { opacity: 0; transform: translateY(-10px) } to { opacity: 1; transform: none } }
+  @keyframes msgIn { from { opacity: 0; transform: translateY(7px) } to { opacity: 1; transform: none } }
+  @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 16px) } to { opacity: .95; transform: translate(-50%, 0) } }
+  @keyframes tileIn { from { opacity: 0; transform: scale(.965) } to { opacity: 1; transform: none } }
+  @keyframes slideRight { from { opacity: 0; transform: translateX(-12px) } to { opacity: 1; transform: none } }
+  @keyframes typingPulse { 0%, 100% { opacity: .55 } 50% { opacity: 1 } }
+  @keyframes softPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(88,101,242,.35) } 50% { box-shadow: 0 0 0 5px rgba(88,101,242,0) } }
+
+  /* Общие переходы: цвет, рамка, тень и лёгкое нажатие. */
+  .chan, .rail-btn, .tb-btn, .cbtn, .pill, .primary, .chip, .pick, .side-add,
+  .crow, .scr-tile, .screen-cell, .msg-act, .del, .del-msg, .link, .tab,
+  .switch, .call-btn, .charge, .x-btn, .vuser, .card-btns button {
+    transition: background-color var(--t1) var(--ease), color var(--t1) var(--ease),
+      border-color var(--t1) var(--ease), box-shadow var(--t2) var(--ease),
+      opacity var(--t2) var(--ease), transform var(--t1) var(--ease);
+  }
+  button:not(:disabled):active { transform: scale(.975); }
+  .chan:active, .rail-btn:active, .chip:active, .pick:active { transform: scale(.965); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 1px; }
+
+  /* Окна и панели: затемнение + всплытие. */
+  .modal-back { animation: fadeIn var(--t2) var(--ease-out); }
+  .modal-back > .dlg, .modal-back > .settings { animation: popIn var(--t3) var(--ease-out); }
+  .auth-card { animation: popIn var(--t3) var(--ease-out); }
+  .welcome:not(.hidden) { animation: fadeIn var(--t3) var(--ease-out); }
+  .settings-body { animation: fadeIn var(--t2) var(--ease-out); }
+  .emoji-panel:not(.hidden) { animation: popIn var(--t2) var(--ease-out); }
+  .lightbox:not(.hidden) { animation: fadeIn var(--t2) var(--ease-out); }
+  .lightbox img { animation: tileIn var(--t3) var(--ease-out); }
+
+  /* Сообщения: появление только у новых, наведение — мягкая подсветка. */
+  .msg { transition: background-color var(--t2) var(--ease); }
+  .msg:hover { background: rgba(255, 255, 255, .022); border-radius: 8px; }
+  .msg.msg-fresh { animation: msgIn var(--t3) var(--ease-out) both; }
+  .msg.flash { animation: fadeIn var(--t2) var(--ease-out); }
+  .typing:not(:empty) { animation: typingPulse 1.6s ease-in-out infinite; }
+
+  /* Список чатов: плавное появление строк и «пружина» у значка звонка. */
+  .side-scroll .chan { transition: background-color var(--t1) var(--ease), color var(--t1) var(--ease), transform var(--t1) var(--ease); }
+  .chan .mic:hover, .chan .del:hover { transform: scale(1.12); }
+  .voice-box:not(.hidden) { animation: slideRight var(--t3) var(--ease-out); }
+
+  /* Звонок и экраны. */
+  .call:not(.hidden) { animation: fadeIn var(--t2) var(--ease-out); }
+  .call-head { animation: dropIn var(--t3) var(--ease-out); }
+  .call-card:not(.hidden), #callBox:not(.hidden) { animation: popIn var(--t3) var(--ease-out); }
+  .scr-tile, .screen-cell { animation: tileIn var(--t2) var(--ease-out) both; }
+  .screen-stage:not(.hidden) { animation: fadeIn var(--t2) var(--ease-out); }
+  .vtile { transition: transform var(--t2) var(--ease), box-shadow var(--t2) var(--ease); }
+  .vtile:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0,0,0,.35); }
+
+  /* Кнопка «вниз / новые сообщения» (1.9.0). */
+  .jump-down {
+    position: absolute; right: 20px; bottom: 108px; z-index: 30;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 999px; padding: 7px 12px; font-size: 13px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, .38); cursor: pointer;
+    animation: popIn var(--t2) var(--ease-out);
+  }
+  .jump-down:hover { border-color: var(--accent); }
+  .jump-down .jd-arrow { font-size: 15px; line-height: 1; }
+  .jump-down .jd-count {
+    min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+    background: var(--danger); color: #fff; font-size: 11px; font-weight: 700;
+    display: grid; place-items: center;
+  }
+  @media (max-width: 760px) {
+    .jump-down { right: 12px; bottom: 88px; }
+  }
+
+  /* Тосты и мелочи. */
+  .toast.show { animation: toastIn var(--t2) var(--ease-out); }
+  .vtile .vscreen, .call-people { transition: opacity var(--t2) var(--ease); }
+  .install-note, .hint { transition: color var(--t2) var(--ease); }
+  /* Смена темы — плавно, но только у крупных поверхностей. */
+  body, .side, .rail, .topbar, .settings, .settings-nav, .call, .auth { transition: background-color var(--t3) var(--ease), color var(--t3) var(--ease); }
+
   @media (prefers-reduced-motion: reduce) {
     * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  }
+  /* Пользовательская настройка «Плавные анимации: выкл» — движение убираем совсем. */
+  body.no-anim *, body.no-anim *::before, body.no-anim *::after {
+    animation: none !important;
+    transition: none !important;
   }
 </style>
 </head>
@@ -908,6 +1002,10 @@
     </div>
     <div class="messages" id="messages"></div>
     <div class="typing" id="typing"></div>
+    <button class="jump-down hidden" id="jumpDown" type="button" title="Вниз">
+      <span class="jd-arrow">↓</span>
+      <span class="jd-count hidden" id="jumpDownCount"></span>
+    </button>
     <div class="search-pane hidden" id="searchPane">
       <div class="search-head">
         <input id="searchQuery" placeholder="Поиск по истории" autocomplete="off" maxlength="100">
@@ -1107,7 +1205,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = '1.8.2';
+const APP_VERSION = '1.9.0';
 // В браузере адрес сервера — тот же, откуда открыта страница. В мобильном
 // приложении интерфейс лежит внутри APK, поэтому адрес сервера задаётся
 // отдельно (window.__ARC_SERVER__), а все пути к API и картинкам получают префикс.
@@ -1183,6 +1281,9 @@ const store = {
   card: null,
   pendingScroll: null,
   pendingTimer: null,
+  // id сообщений, которые нужно показать с анимацией появления (1.9.0).
+  freshIds: new Set(),
+  jumpCount: 0,
   uploading: 0,
 };
 let authMode = 'login';
@@ -1674,8 +1775,12 @@ function handle(data) {
       rememberAvatar(data.author, data.authorProfile && data.authorProfile.avatarUrl);
       rememberProfile(data.author, data.authorProfile);
       list.push(data);
+      // Только что пришедшее сообщение помечаем для анимации появления.
+      if (data.id != null) store.freshIds.add(data.id);
       const mine = store.me && data.author === store.me.name;
-      if (data.room === store.room) renderMessages({ force: !!mine });
+      const readingHistory = data.room === store.room && !nearBottom();
+      if (data.room === store.room) renderMessages({ force: !!mine && !readingHistory });
+      if (readingHistory && !mine) noteNewWhileAway();
       if (!roomIsVisible(data.room)) bumpUnread(data.room);
       notifyMessage(data);
       break;
@@ -2156,8 +2261,11 @@ function openRoom(room, kind, title, peerName) {
   $('searchBtn').classList.remove('hidden');
   clearTypers();
   clearUnread(room);
+  store.jumpCount = 0;
   renderChannels();
   renderMessages({ force: true });
+  setJumpCount(0);
+  updateJumpDown();
   if (kind === 'dm') {
     const other = peerName || title.replace(/^@ /, '');
     send({ t: 'dm_open', name: other });
@@ -2353,13 +2461,86 @@ function renderMessages(options) {
     box.innerHTML = '<div class="empty">Сообщений пока нет — напишите первым.</div>';
     return;
   }
-  for (const m of list) box.appendChild(buildMessageRow(m));
+  for (const m of list) {
+    const row = buildMessageRow(m);
+    // Анимация появления — только у сообщений, пришедших вживую, и только
+    // один раз: полная перерисовка ленты не должна «дёргать» историю.
+    if (m && m.id != null && store.freshIds.has(m.id)) {
+      row.classList.add('msg-fresh');
+      store.freshIds.delete(m.id);
+    }
+    box.appendChild(row);
+  }
   if (opts.force || wasNearBottom) scrollDown();
   else box.scrollTop = prevTop;
 }
 function scrollDown() {
   const box = $('messages');
   box.scrollTop = box.scrollHeight;
+  updateJumpDown();
+}
+
+/* ------------------------------ кнопка «вниз / новые сообщения» 1.9.0 */
+function nearBottom(box) {
+  const el = box || $('messages');
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+}
+
+function updateJumpDown() {
+  const btn = $('jumpDown');
+  if (!btn) return;
+  const box = $('messages');
+  const away = !!box && !box.classList.contains('hidden') && !nearBottom(box);
+  btn.classList.toggle('hidden', !away);
+  if (!away) setJumpCount(0);
+}
+
+function setJumpCount(count) {
+  const badge = $('jumpDownCount');
+  if (!badge) return;
+  const value = Number(count) || 0;
+  badge.textContent = value > 99 ? '99+' : String(value);
+  badge.classList.toggle('hidden', value <= 0);
+}
+
+// Новое сообщение при прокрученной истории: показываем кнопку и считаем.
+function noteNewWhileAway() {
+  const btn = $('jumpDown');
+  if (!btn) return;
+  store.jumpCount = (store.jumpCount || 0) + 1;
+  setJumpCount(store.jumpCount);
+  updateJumpDown();
+}
+
+if ($('jumpDown')) $('jumpDown').onclick = () => jumpToBottom(true);
+(function wireJumpDown() {
+  const box = $('messages');
+  if (!box) return;
+  box.addEventListener('scroll', () => {
+    // Пока человек листает вниз сам — счётчик новых обнуляем.
+    if (nearBottom(box)) store.jumpCount = 0;
+    updateJumpDown();
+  }, { passive: true });
+})();
+
+function jumpToBottom(smooth) {
+  const box = $('messages');
+  if (!box) return;
+  const animated = smooth !== false && S().animations !== false;
+  try {
+    if (animated && typeof box.scrollTo === 'function') {
+      box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+    } else {
+      box.scrollTop = box.scrollHeight;
+    }
+  } catch (error) {
+    box.scrollTop = box.scrollHeight;
+  }
+  store.jumpCount = 0;
+  setJumpCount(0);
+  if (store.room) clearUnread(store.room);
+  setTimeout(updateJumpDown, 300);
 }
 
 /* --------------------------------------------------- сообщение: цитата, реакции, картинка */
@@ -3512,7 +3693,7 @@ let updateUnsub = null;
 
 function settingsDefaults() {
   return {
-    theme: 'dark', fontScale: 100, compact: false, showTime: true, showTyping: true,
+    theme: 'dark', fontScale: 100, compact: false, showTime: true, showTyping: true, animations: true,
     notifySound: true, notifyDesktop: true, notifyAll: true,
     soundVolume: 60, notifyTone: 'chime', dnd: false,
     dmPrivacy: 'all', status: 'online',
@@ -3626,6 +3807,8 @@ function applySettings(next) {
   document.body.style.zoom = String(scale / 100);
   document.body.classList.toggle('compact', !!s.compact);
   document.body.classList.toggle('hide-time', s.showTime === false);
+  // Пользователь может отключить движение, даже если ОС его не отключает.
+  document.body.classList.toggle('no-anim', s.animations === false);
   if (s.showTyping === false) clearTypers();
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', theme === 'light' ? '#ffffff' : theme === 'midnight' ? '#06070b' : '#5865f2');
@@ -3973,6 +4156,7 @@ function tabAppearance(body) {
   addSwitch(sect2, 'Компактный режим', 'Меньше отступов между сообщениями', s.compact, (v) => saveSettings({ compact: v }));
   addSwitch(sect2, 'Показывать время', 'Рядом с именем автора сообщения', s.showTime !== false, (v) => saveSettings({ showTime: v }));
   addSwitch(sect2, 'Показывать «печатает…»', 'Видно, когда собеседник набирает текст', s.showTyping !== false, (v) => saveSettings({ showTyping: v }));
+  addSwitch(sect2, 'Плавные анимации', 'Движение окон, сообщений и панелей. Выключите, если нужен «жёсткий» интерфейс', s.animations !== false, (v) => saveSettings({ animations: v }));
   body.appendChild(sect2);
 }
 
@@ -4524,7 +4708,7 @@ function tabAccount(body) {
   const rowApk = mkRow('Android-приложение (APK)', 'Скачайте файл и откройте его на телефоне. Разрешите установку из этого источника.');
   const apkLink = el('a', 'pill', 'Скачать APK');
   apkLink.href = '/download/Arc.apk';
-  apkLink.setAttribute('download', 'Arc-1.8.2.apk');
+  apkLink.setAttribute('download', 'Arc-1.9.0.apk');
   apkLink.style.textDecoration = 'none';
   apkLink.style.display = 'inline-block';
   apkLink.style.padding = '8px 16px';
@@ -5126,6 +5310,12 @@ function renderSettings(tab) {
   const body = $('settingsBody');
   if (!body) return;
   body.innerHTML = '';
+  // Перезапускаем мягкое появление контента при смене вкладки.
+  try {
+    body.style.animation = 'none';
+    void body.offsetWidth;
+    body.style.animation = '';
+  } catch (error) {}
   document.querySelectorAll('.settings-nav button[data-tab]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.tab === currentTab);
   });
@@ -6372,6 +6562,7 @@ function renderScreenArea(sources, refs) {
     if (splitBox) splitBox.classList.add('hidden');
     if (tilesBox) tilesBox.classList.add('hidden');
     if (video) video.srcObject = null;
+    store.screenSig = '';
     return;
   }
   // Один экран — он всегда большой, никаких переключателей.
@@ -6394,8 +6585,14 @@ function renderScreenArea(sources, refs) {
     stageBox.style.cursor = sources.length > 1 ? 'zoom-out' : 'default';
   }
 
+  // Перерисовываем ячейки и превью, только если изменился состав экранов или
+  // режим: иначе любое обновление голосового состояния перезапускало анимацию.
+  const sig = (single ? 'single' : focus ? 'focus:' + focus : 'split') + '|' + keys.join(',');
+  const sameSig = store.screenSig === sig;
+  store.screenSig = sig;
+
   // Общий вид: каждый экран в своей ячейке, клик — увеличить.
-  if (splitBox && split) {
+  if (splitBox && split && !sameSig) {
     splitBox.innerHTML = '';
     splitBox.dataset.count = String(sources.length);
     for (const one of sources) {
@@ -6420,10 +6617,10 @@ function renderScreenArea(sources, refs) {
 
   // В режиме фокуса снизу — превью остальных экранов для быстрого переключения.
   if (tilesBox) {
-    tilesBox.innerHTML = '';
     const show = !!focused && sources.length > 1;
     tilesBox.classList.toggle('hidden', !show);
-    if (show) {
+    if (show && !sameSig) {
+      tilesBox.innerHTML = '';
       for (const one of sources) {
         const tile = document.createElement('button');
         tile.type = 'button';
@@ -6452,6 +6649,8 @@ function renderScreenArea(sources, refs) {
         renderCall();
       };
       tilesBox.appendChild(all);
+    } else if (!show) {
+      tilesBox.innerHTML = '';
     }
   }
 

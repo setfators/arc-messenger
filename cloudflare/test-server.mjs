@@ -255,6 +255,14 @@ C.send({ t: 'settings_update', settings: { screenFps: 1 } });
 const fps1 = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.screenFps === 15, 2000, 'screenFps min');
 check('слишком маленькое значение поднимается до 15', !!fps1, JSON.stringify(fps1 && fps1.settings && fps1.settings.screenFps));
 
+// Плавность анимаций — булева настройка, сохраняется и отдаётся обратно.
+C.send({ t: 'settings_update', settings: { animations: false } });
+const animOff = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.animations === false, 2000, 'animations off');
+check('анимации можно выключить', !!animOff, JSON.stringify(animOff && animOff.settings && animOff.settings.animations));
+C.send({ t: 'settings_update', settings: { animations: true } });
+const animOn = await C.waitFresh((m) => m.t === 'settings' && m.settings && m.settings.animations === true, 2000, 'animations on');
+check('анимации можно включить обратно', !!animOn, JSON.stringify(animOn && animOn.settings && animOn.settings.animations));
+
 // Остальные настройки демонстрации, микрофона и клавиши — тоже проверяются.
 C.send({ t: 'settings_update', settings: { screenQuality: '720', screenAsk: false, micSensitivity: 80, voiceMode: 'ptt', pttKey: 'Alt+KeyQ' } });
 const voiceSettings = await C.waitFresh((m) => m.t === 'settings' && m.settings
@@ -302,7 +310,7 @@ if (toDelete) {
 }
 
 // --- версия 1.4.0: реакции, ответы, картинки, поиск, push --------------------
-check('hello знает версию 1.7.x', !!(helloA && /^1\.8\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
+check('hello знает версию 1.9.x', !!(helloA && /^1\.9\.\d+$/.test(String(helloA.version))), helloA && helloA.version);
 check('hello отдаёт VAPID-ключ', !!(helloA && typeof helloA.pushKey === 'string' && helloA.pushKey.length > 40),
   helloA && String(helloA.pushKey).slice(0, 20));
 

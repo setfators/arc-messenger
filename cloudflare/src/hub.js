@@ -4,7 +4,7 @@
 
 import { mxDefault, mxNorm, mxPublic, mxSend, mxSync, mxWhoami } from './matrix.js';
 
-const APP_VERSION = '1.8.2';
+const APP_VERSION = '1.9.0';
 const HISTORY_LIMIT = 300;
 const MAX_TEXT_CHARS = 4000;
 // Приватные каналы (1.5.0): канал виден только создателю и тем, кого он позвал.
@@ -85,6 +85,7 @@ function defaultSettings() {
     dnd: false,
     showTyping: true,
     showAvatars: true,
+    animations: true,     // плавные анимации интерфейса (1.9.0)
     groupMessages: true,  // склеивать подряд идущие сообщения автора
     clock24: true,
     dmPrivacy: 'all',     // all | friends
@@ -138,7 +139,7 @@ function mergeSettings(base, patch) {
   }
   if (typeof patch.pttKey === 'string') out.pttKey = clip(patch.pttKey, 40);
   if (patch.searchPrivacy === 'all' || patch.searchPrivacy === 'friends') out.searchPrivacy = patch.searchPrivacy;
-  for (const flag of ['compact', 'showTime', 'enterToSend', 'notifySound', 'notifyDesktop', 'notifyAll', 'dnd', 'showTyping', 'showAvatars', 'groupMessages', 'clock24', 'noiseSuppress', 'echoCancel', 'autoGain']) {
+  for (const flag of ['compact', 'showTime', 'enterToSend', 'notifySound', 'notifyDesktop', 'notifyAll', 'dnd', 'showTyping', 'showAvatars', 'groupMessages', 'clock24', 'animations', 'noiseSuppress', 'echoCancel', 'autoGain']) {
     if (typeof patch[flag] === 'boolean') out[flag] = patch[flag];
   }
   if (patch.dmPrivacy === 'all' || patch.dmPrivacy === 'friends') out.dmPrivacy = patch.dmPrivacy;

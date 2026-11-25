@@ -74,11 +74,11 @@ function check(name, cond, extra) {
 
 await sleep(150);
 const ws = sockets[0];
-check('версия клиента 1.8.2', window.APP_VERSION === '1.8.2' || $('body').textContent.includes('1.8.2'), 'APP_VERSION');
+check('версия клиента 1.9.0', window.APP_VERSION === '1.9.0' || $('body').textContent.includes('1.9.0'), 'APP_VERSION');
 ws.open();
 
 ws.push({
-  t: 'hello', version: '1.8.2', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
+  t: 'hello', version: '1.9.0', pushKey: 'BAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij',
   me: { name: 'anna', color: '#5865f2', profile: { displayName: 'Анна', avatarUrl: '' }, status: 'online', settings: { status: 'online' } },
   channels: ['obshiy'],
   channelItems: [{ room: 'obshiy', title: 'obshiy', owner: 'anna', ownerKey: 'anna', mine: true, count: 1, members: [{ name: 'anna', displayName: 'Анна', online: true }] }],
@@ -129,6 +129,35 @@ if (window.showCall) {
   check('кнопка «Все экраны» скрыта без фокуса', $('#callAllScreens').classList.contains('hidden'), $('#callAllScreens').className);
   if (window.hideCall) window.hideCall();
   await sleep(30);
+}
+
+// --- кнопка «вниз / новые сообщения» --------------------------------------
+check('кнопка «вниз» существует и скрыта у низа ленты', !!$('#jumpDown') && $('#jumpDown').classList.contains('hidden'),
+  $('#jumpDown') ? $('#jumpDown').className : 'нет кнопки');
+if (window.updateJumpDown && $('#jumpDown')) {
+  // jsdom не считает layout: эмулируем «прокручено вверх» через scrollHeight.
+  const box = $('#messages');
+  const original = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(box), 'clientHeight');
+  try {
+    Object.defineProperty(box, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(box, 'clientHeight', { configurable: true, value: 300 });
+    Object.defineProperty(box, 'scrollTop', { configurable: true, writable: true, value: 100 });
+    window.updateJumpDown();
+    await sleep(30);
+    check('при прокрутке вверх кнопка показывается', !$('#jumpDown').classList.contains('hidden'), $('#jumpDown').className);
+  } finally {
+    if (original) Object.defineProperty(box, 'clientHeight', original);
+  }
+}
+
+// --- настройка плавности: выключение анимаций ------------------------------
+if (window.applySettings) {
+  window.applySettings({ animations: false });
+  await sleep(40);
+  check('выключение анимаций ставит body.no-anim', doc.body.classList.contains('no-anim'), doc.body.className);
+  window.applySettings({ animations: true });
+  await sleep(40);
+  check('включение анимаций снимает класс', !doc.body.classList.contains('no-anim'), doc.body.className);
 }
 
 // --- горячие клавиши ------------------------------------------------------
@@ -244,7 +273,7 @@ if (accountTabBtn) {
   accountTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await sleep(60);
   const bodyText = ($('#settingsBody') ? $('#settingsBody').textContent : '') || '';
-  check('в аккаунте видна версия', /1\.8\.\d+/.test(bodyText), bodyText.slice(0, 200));
+  check('в аккаунте видна версия', /1\.9\.\d+/.test(bodyText), bodyText.slice(0, 200));
   const passInputs = [...doc.querySelectorAll('#settingsBody input[type="password"]')];
   check('три поля для смены пароля', passInputs.length >= 3, 'inputs=' + passInputs.length);
   if (passInputs.length >= 3) {

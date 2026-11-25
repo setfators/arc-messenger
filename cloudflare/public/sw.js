@@ -1,7 +1,7 @@
 /* Service worker приложения «Arc».
    Кэширует оболочку, чтобы приложение открывалось с иконки даже при плохой сети.
    Сообщения и голос не кэшируются: они идут по WebSocket. */
-const CACHE = 'arc-shell-v13';
+const CACHE = 'arc-shell-v14';
 const SHELL = [
   '/',
   '/index.html',

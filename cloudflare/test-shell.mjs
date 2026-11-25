@@ -31,6 +31,12 @@ for (const [name, html] of [['сайт', web], ['APK', mobile]]) {
   check(name + ': два экрана рядом (split)', html.includes('id="screenSplit"') && html.includes('function renderScreenArea') && html.includes('screen-cell'), '');
   check(name + ': возврат ко всем экранам', html.includes('id="callAllScreens"') && html.includes("'Все экраны'"), '');
   check(name + ': адаптив двух экранов', html.includes('grid-template-rows: 1fr 1fr'), '');
+  check(name + ': система анимаций', html.includes('@keyframes msgIn') && html.includes('--ease-out') && html.includes('--t3'), '');
+  check(name + ': анимация только новых сообщений', html.includes('msg-fresh') && html.includes('freshIds'), '');
+  check(name + ': окна и тосты анимированы', html.includes('.modal-back > .dlg') && html.includes('toastIn'), '');
+  check(name + ': уважение «меньше движения»', html.includes('prefers-reduced-motion'), '');
+  check(name + ': настройка «Плавные анимации»', html.includes('no-anim') && html.includes('Плавные анимации') && html.includes('animations: true'), '');
+  check(name + ': кнопка «вниз / новые сообщения»', html.includes('id="jumpDown"') && html.includes('function jumpToBottom') && html.includes('updateJumpDown'), '');
   check(name + ': мини-превью экранов', html.includes('scr-tile') && html.includes('scr-tile-name'), '');
   check(name + ': адаптивная вёрстка', html.includes('100dvh') && html.includes('safe-area-inset') && html.includes('@media (max-width: 480px)'), '');
   check(name + ': пересчёт размеров окна', html.includes('function syncViewport') && html.includes("addEventListener('orientationchange'"), '');

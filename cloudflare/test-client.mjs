@@ -144,6 +144,16 @@ await new Promise((r) => setTimeout(r, 30));
 check('новое сообщение в открытом канале дорисовано', texts('#messages .msg .body').includes('ещё раз'));
 check('о сообщении в своей комнате не уведомляем', notifications.length === notifBefore, 'notif=' + notifications.length);
 
+// --- плавное появление новых сообщений ---------------------------------------
+check('новое сообщение приходит с анимацией появления', !!doc.querySelector('#messages .msg.msg-fresh'),
+  [...doc.querySelectorAll('#messages .msg')].map((n) => n.className).join('|'));
+ws.push({ t: 'msg', id: 33, room: 'obshiy', author: 'boris', text: 'после анимации', ts: Date.now(), authorProfile: { displayName: 'Борис' } });
+await new Promise((r) => setTimeout(r, 40));
+const freshRows = [...doc.querySelectorAll('#messages .msg.msg-fresh')];
+check('анимация не повторяется у старых сообщений',
+  freshRows.length === 1 && freshRows[0].dataset.id === '33',
+  freshRows.map((n) => n.dataset.id).join(','));
+
 // --- сообщение в другом канале: счётчик + уведомление ------------------------
 // Окно не в фокусе — как будто человек свернул браузер.
 doc.hasFocus = () => false;
