@@ -88,7 +88,7 @@ function check(name, cond, extra) {
 
 await sleep(150);
 const ws = sockets[0];
-check('версия клиента 1.12.0', window.APP_VERSION === '1.12.0' || $('body').textContent.includes('1.12.0'), 'APP_VERSION');
+check('версия клиента 1.13.0', window.APP_VERSION === '1.13.0' || $('body').textContent.includes('1.13.0'), 'APP_VERSION');
 ws.open();
 
 ws.push({
@@ -389,7 +389,7 @@ if (accountTabBtn) {
   accountTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await sleep(60);
   const bodyText = ($('#settingsBody') ? $('#settingsBody').textContent : '') || '';
-  check('в аккаунте видна версия', /1\.12\.\d+/.test(bodyText), bodyText.slice(0, 200));
+  check('в аккаунте видна версия', /1\.13\.\d+/.test(bodyText), bodyText.slice(0, 200));
   const passInputs = [...doc.querySelectorAll('#settingsBody input[type="password"]')];
   check('три поля для смены пароля', passInputs.length >= 3, 'inputs=' + passInputs.length);
   if (passInputs.length >= 3) {

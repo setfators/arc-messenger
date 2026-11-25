@@ -8,7 +8,7 @@
     "deploy:dry": "node node_modules/wrangler/bin/wrangler.js deploy --dry-run --outdir dist-check",
     "check": "node --check src/hub.js && node --check src/index.js && node --check src/matrix.js",
     "mobile:www": "node scripts/build-mobile-www.mjs",
-    "test": "node test-client.mjs && node test-client-140.mjs",
+    "test": "node test-markdown-113.mjs && node test-client.mjs && node test-client-140.mjs && node test-client-113.mjs",
     "test:mobile": "node scripts/build-mobile-www.mjs && node test-mobile.mjs"
   },
   "devDependencies": {

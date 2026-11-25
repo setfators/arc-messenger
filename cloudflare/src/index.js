@@ -272,8 +272,10 @@ export default {
       }
       return stub.fetch(request);
     }
-    // Картинки аватаров и стикеров отдаёт сам Durable Object.
-    if (url.pathname.startsWith('/avatar/') || url.pathname.startsWith('/sticker/')) {
+    // Картинки аватаров, стикеров и своих эмодзи, а также звуки панели
+    // отдаёт сам Durable Object.
+    if (url.pathname.startsWith('/avatar/') || url.pathname.startsWith('/sticker/')
+      || url.pathname.startsWith('/emoji/') || url.pathname.startsWith('/sound/')) {
       return stub.fetch(request);
     }
     if (url.pathname === '/health') {

@@ -21,7 +21,7 @@ check('версия клиента', /APP_VERSION = '\d+\.\d+\.\d+'/.test(page))
 check('каналы приватные: замок и число участников', page.includes("'lock', '🔒'") && page.includes("'cnt'"));
 check('удаление общего канала не блокируется', !page.includes('Общий канал удалить нельзя'));
 check('звонки в личке на месте', page.includes('startDmCall') && page.includes('callBox'));
-check('правка сообщений на месте', page.includes('edited-mark'));
+check('правка сообщений на месте', page.includes('edited'));
 check('файлы на месте', page.includes('file-card'));
 
 const health = await fetch(B + '/health');

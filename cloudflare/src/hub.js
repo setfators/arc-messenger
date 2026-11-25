@@ -4,7 +4,7 @@
 
 import { mxDefault, mxNorm, mxPublic, mxSend, mxSync, mxWhoami } from './matrix.js';
 
-const APP_VERSION = '1.12.1';
+const APP_VERSION = '1.13.0';
 const HISTORY_LIMIT = 300;
 const MAX_TEXT_CHARS = 4000;
 // Приватные каналы (1.5.0): канал виден только создателю и тем, кого он позвал.
@@ -23,6 +23,44 @@ const AVATAR_MAX_BYTES = 512 * 1024;
 const STICKER_MAX_BYTES = 256 * 1024;
 const STICKER_LIMIT = 80;
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+// Релиз 1.13.0: закреплённые сообщения, опросы, медленный режим и описание
+// канала, свои эмодзи и звуки, журнал действий, категории каналов.
+const PIN_LIMIT = 50;             // закреплённых сообщений на одну комнату
+const POLL_QUESTION_MAX = 200;    // длина вопроса опроса
+const POLL_OPTIONS_MIN = 2;       // вариантов ответа в опросе…
+const POLL_OPTIONS_MAX = 10;      // …и не больше десяти
+const POLL_OPTION_MAX = 80;       // длина одного варианта
+const SLOW_MAX = 21600;           // медленный режим: не больше 6 часов
+const CHANNEL_TOPIC_MAX = 200;    // описание канала
+const EMOJI_LIMIT = 60;           // своих эмодзи на сервере
+const EMOJI_MAX_BYTES = 128 * 1024;
+const EMOJI_NAME_RE = /^[a-z0-9_]{2,20}$/;
+const SOUND_LIMIT = 24;           // своих звуков на сервере
+const SOUND_MAX_BYTES = 512 * 1024;
+const SOUND_NAME_MAX = 24;
+// Не чаще одного звука в 1,5 секунды на человека: иначе панель превращается
+// в оружие против голосового канала.
+const SOUND_COOLDOWN = 1500;
+const SOUND_MIMES = [
+  'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm',
+  'audio/mp4', 'audio/aac', 'audio/x-wav', 'audio/x-m4a',
+];
+// Встроенные звуки панели: сами файлы лежат в клиенте, сервер пересылает ключ.
+const SOUND_KEYS = ['boing', 'drum', 'applause', 'bruh', 'airhorn', 'sparkle', 'tada', 'vine'];
+const AUDIT_LIMIT = 300;          // сколько записей журнала держим
+const AUDIT_VIEW = 200;           // сколько отдаём по audit_list
+// Пересылка сообщений: не больше десяти в минуту и цитата в 200 символов.
+const FORWARD_RATE = 10;
+const FORWARD_WINDOW = 60 * 1000;
+const FORWARD_HEAD = 200;
+// Личная раскладка каналов по категориям.
+const CAT_LIMIT = 10;
+const CAT_NAME_MAX = 40;
+const CAT_ID_LEN = 16;
+// Статус текстом в профиле.
+const STATUS_TEXT_MAX = 60;
+const STATUS_EMOJI_MAX = 8;       // кодовых пунктов в одном эмодзи
 
 // Вложения сообщений (1.4.0): сырые байты режутся на куски по 96 КБ и лежат
 // в storage Durable Object. Держим не больше 120 последних картинок.
@@ -255,6 +293,33 @@ function imageSignatureOk(bytes, mime) {
   return false;
 }
 
+// Звук из панели: mime тоже можно подделать, поэтому проверяем сигнатуру.
+// Первых 12 байт хватает на все контейнеры, которые мы разрешаем.
+function audioSignatureOk(bytes, mime) {
+  if (!bytes || bytes.length < 12) return false;
+  const at = (text, offset = 0) => {
+    for (let i = 0; i < text.length; i += 1) {
+      if (bytes[offset + i] !== text.charCodeAt(i)) return false;
+    }
+    return true;
+  };
+  const id3 = at('ID3');
+  // Кадр MPEG: 11 бит синхронизации 0xFFE (0xFFFB и родственные варианты).
+  const mp3 = bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0;
+  const ogg = at('OggS');
+  const wav = at('RIFF') && at('WAVE', 8);
+  const mp4 = at('ftyp', 4);
+  const mkv = bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
+  const adts = bytes[0] === 0xff && (bytes[1] & 0xf6) === 0xf0; // AAC ADTS
+  if (mime === 'audio/mpeg') return id3 || mp3;
+  if (mime === 'audio/ogg') return ogg;
+  if (mime === 'audio/wav' || mime === 'audio/x-wav') return wav;
+  if (mime === 'audio/webm') return mkv;
+  if (mime === 'audio/mp4' || mime === 'audio/x-m4a') return mp4;
+  if (mime === 'audio/aac') return adts || id3;
+  return false;
+}
+
 // Реакция: 1–4 кодовых пункта, эмодзи. ZWJ, селектор FE0F, тона кожи и
 // региональные индикаторы допускаем — из них состоят составные эмодзи.
 function reactionEmoji(raw) {
@@ -436,6 +501,38 @@ export class ChatHub {
         for (const room of Object.keys(this.store.channelCodes)) {
           if (!this.store.channels.includes(room)) delete this.store.channelCodes[room];
         }
+        // Релиз 1.13.0: закреплённые, свои эмодзи и звуки, журнал действий и
+        // личные категории каналов. Всё создаём на месте, чтобы база прежних
+        // версий открывалась без ошибок.
+        if (!this.store.pins || Array.isArray(this.store.pins) || typeof this.store.pins !== 'object') this.store.pins = {};
+        if (!Array.isArray(this.store.emoji)) this.store.emoji = [];
+        if (!Array.isArray(this.store.sounds)) this.store.sounds = [];
+        if (!Array.isArray(this.store.audit)) this.store.audit = [];
+        if (typeof this.store.auditSeq !== 'number') this.store.auditSeq = 0;
+        if (!this.store.cats || Array.isArray(this.store.cats) || typeof this.store.cats !== 'object') this.store.cats = {};
+        if (!this.store.catOf || Array.isArray(this.store.catOf) || typeof this.store.catOf !== 'object') this.store.catOf = {};
+        // Чистим закреплённые удалённых комнат: иначе они копятся в базе вечно.
+        for (const room of Object.keys(this.store.pins)) {
+          const alive = this.store.channels.includes(room) || !!this.store.rooms[room];
+          if (!alive) delete this.store.pins[room];
+        }
+        // Категории и привязки удалённых аккаунтов и невидимых комнат не храним.
+        for (const who of Object.keys(this.store.cats)) {
+          if (!this.store.users[who]) { delete this.store.cats[who]; continue; }
+          if (!Array.isArray(this.store.cats[who])) this.store.cats[who] = [];
+        }
+        for (const who of Object.keys(this.store.catOf)) {
+          const map = this.store.catOf[who];
+          if (!this.store.users[who] || !map || typeof map !== 'object') {
+            delete this.store.catOf[who];
+            continue;
+          }
+          const known = new Set((this.store.cats[who] || []).map((one) => one && one.id));
+          for (const [room, catId] of Object.entries(map)) {
+            const visible = this.inChannel(who, room) || !!dmPartners(room);
+            if (!known.has(catId) || !visible) delete map[room];
+          }
+        }
         // Вложения до 1.5.0 не знали своего канала: проставляем комнату по
         // истории, чтобы старые картинки открывались у участников канала.
         if (this.store.mediaCheck !== 2) {
@@ -480,6 +577,49 @@ export class ChatHub {
 
   save() {
     return this.state.storage.put('state', this.store);
+  }
+
+  // ------------------------------------------------ журнал действий 1.13.0
+  // Пишем только то, что и так уже произошло с правами модерации: кто, что,
+  // над кем и короткая расшифровка. Храним последние AUDIT_LIMIT записей.
+  audit(actorKey, actorName, action, target, detail) {
+    if (!Array.isArray(this.store.audit)) this.store.audit = [];
+    if (typeof this.store.auditSeq !== 'number') this.store.auditSeq = 0;
+    this.store.auditSeq += 1;
+    this.store.audit.push({
+      id: this.store.auditSeq,
+      ts: now(),
+      actor: String(actorName || ''),
+      actorKey: String(actorKey || ''),
+      action: String(action || ''),
+      target: head(String(target || ''), 120),
+      detail: head(String(detail || ''), 200),
+    });
+    while (this.store.audit.length > AUDIT_LIMIT) this.store.audit.shift();
+  }
+
+  auditPayload() {
+    // Свежие записи первыми — так их читает вкладка управления.
+    return { t: 'audit', items: (this.store.audit || []).slice(-AUDIT_VIEW).reverse() };
+  }
+
+  // Событие комнаты: в канале — участникам, в личке — обоим собеседникам.
+  roomSend(room, payload) {
+    const pair = dmPartners(room);
+    if (pair) {
+      this.sendTo(pair[0], payload);
+      this.sendTo(pair[1], payload);
+      return;
+    }
+    this.sendChannel(room, payload);
+  }
+
+  // Убираем закреплённые и личные привязки категорий удалённой комнаты.
+  dropRoomExtras(room) {
+    if (this.store.pins) delete this.store.pins[room];
+    for (const map of Object.values(this.store.catOf || {})) {
+      if (map && map[room] !== undefined) delete map[room];
+    }
   }
 
   // Ищем пользователя по логину, а если не нашлось — по отображаемому имени
@@ -790,6 +930,7 @@ export class ChatHub {
         delete this.store.rooms[room];
         delete this.store.channelMeta[room];
         this.dropChannelCode(room);
+        this.dropRoomExtras(room);
         removed += 1;
       }
     }
@@ -805,6 +946,9 @@ export class ChatHub {
       accent: p.accent || (user ? user.color : '#5865f2'),
       bio: p.bio || '',
       banner: p.banner || '',
+      // Статус текстом и одним эмодзи (1.13.0): виден рядом с именем.
+      statusText: p.statusText || '',
+      statusEmoji: p.statusEmoji || '',
     };
   }
 
@@ -831,6 +975,82 @@ export class ChatHub {
     }));
   }
 
+  // ---------------- свои эмодзи, звуки, закреплённые и категории (1.13.0)
+  emojiUrl(item) {
+    return '/emoji/' + encodeURIComponent(item.id) + '?v=' + item.v;
+  }
+
+  emojiPackView() {
+    return (this.store.emoji || []).map((one) => ({
+      id: one.id,
+      name: one.name,
+      by: one.by,
+      v: one.v,
+      url: this.emojiUrl(one),
+    }));
+  }
+
+  soundUrl(item) {
+    return '/sound/' + encodeURIComponent(item.id) + '?v=' + item.v;
+  }
+
+  soundPackView() {
+    return (this.store.sounds || []).map((one) => ({
+      id: one.id,
+      name: one.name,
+      by: one.by,
+      v: one.v,
+      url: this.soundUrl(one),
+    }));
+  }
+
+  // Закреплённые комнаты: сообщения берём из истории, удалённые пропускаем.
+  pinsPayload(room) {
+    const list = this.store.rooms[room] || [];
+    const ids = (this.store.pins || {})[room] || [];
+    const items = [];
+    for (const id of ids) {
+      const message = list.find((one) => one && one.id === id);
+      if (!message) continue;
+      items.push({
+        id: message.id,
+        author: message.author,
+        text: head(message.text, 200),
+        ts: message.ts || 0,
+        authorProfile: message.authorProfile || null,
+      });
+    }
+    return { t: 'pins', room, items };
+  }
+
+  // Личные категории каналов: список и привязки конкретного человека.
+  catsPayload(key) {
+    return {
+      t: 'cats',
+      items: (this.store.cats || {})[key] || [],
+      map: (this.store.catOf || {})[key] || {},
+    };
+  }
+
+  // Тип сообщения для иконки в выдаче поиска (1.13.0).
+  messageKind(message) {
+    if (!message) return '';
+    if (message.poll) return 'poll';
+    if (message.media) return 'file';
+    if (/https?:\/\//i.test(String(message.text || ''))) return 'link';
+    return '';
+  }
+
+  // Фильтр has в поиске: file | image | link | poll.
+  messageHasKind(message, has) {
+    if (!message) return false;
+    if (has === 'poll') return !!message.poll;
+    if (has === 'file') return !!(message.media && (message.media.kind || 'image') === 'file');
+    if (has === 'image') return !!(message.media && (message.media.kind || 'image') === 'image');
+    if (has === 'link') return /https?:\/\//i.test(String(message.text || ''));
+    return true;
+  }
+
   // Разбор картинки из base64: тип, содержимое и проверка размера.
   decodeImage(value, maxBytes) {
     const mime = String((value && value.mime) || '').toLowerCase();
@@ -851,6 +1071,23 @@ export class ChatHub {
         'content-type': saved.mime || 'image/png',
         'content-length': String(bytes.length),
         'cache-control': 'public, max-age=604800, immutable',
+        'access-control-allow-origin': '*',
+        'x-content-type-options': 'nosniff',
+      },
+    });
+  }
+
+  // Звук звуковой панели: долгий кэш, чтобы один и тот же файл не качался
+  // заново на каждый хлопок по кнопке.
+  soundResponse(saved) {
+    const binary = atob(String(saved.b64 || ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new Response(bytes, {
+      headers: {
+        'content-type': saved.mime || 'audio/mpeg',
+        'content-length': String(bytes.length),
+        'cache-control': 'public, max-age=604800',
         'access-control-allow-origin': '*',
         'x-content-type-options': 'nosniff',
       },
@@ -1316,6 +1553,9 @@ export class ChatHub {
       members: people,
       count: people.length,
       created: meta ? meta.created || 0 : 0,
+      // Описание канала и медленный режим (1.13.0).
+      topic: meta ? String(meta.topic || '') : '',
+      slow: meta ? Number(meta.slow) || 0 : 0,
       // Ссылку-приглашение видит только создатель: для остальных её просто нет.
       invite: meta && meta.owner === viewerKey ? this.channelCodeOf(room) : '',
       inviteUses: meta && meta.owner === viewerKey
@@ -1334,6 +1574,9 @@ export class ChatHub {
       t: 'channels',
       channels,
       items: channels.map((room) => this.channelView(room, key)),
+      // Личная раскладка по категориям (1.13.0): у каждого своя.
+      cats: (this.store.cats || {})[key] || [],
+      catMap: (this.store.catOf || {})[key] || {},
     };
   }
 
@@ -1503,6 +1746,8 @@ export class ChatHub {
     let messagesDay = 0;
     let dmRooms = 0;
     let dmMessagesDay = 0;
+    // Опросы считаем по истории: отдельного хранилища у них нет (1.13.0).
+    let polls = 0;
     for (const [room, list] of Object.entries(this.store.rooms || {})) {
       if (!Array.isArray(list)) continue;
       const isDm = !!dmPartners(room);
@@ -1510,6 +1755,7 @@ export class ChatHub {
       for (const message of list) {
         if (!message) continue;
         messages += 1;
+        if (message.poll) polls += 1;
         if ((message.ts || 0) < dayAgo) continue;
         messagesDay += 1;
         if (isDm) dmMessagesDay += 1;
@@ -1544,6 +1790,14 @@ export class ChatHub {
         invites: { codes: invites.length, active: activeInvites, uses: inviteUses },
         moderation: { staff: (this.store.staff || []).length, banned },
         backups: { last: this.store.lastBackup || '', keep: BACKUP_KEEP },
+        // Новые сущности 1.13.0: закреплённые, опросы, свои эмодзи и звуки.
+        extras: {
+          pins: Object.values(this.store.pins || {})
+            .reduce((sum, list) => sum + (Array.isArray(list) ? list.length : 0), 0),
+          polls,
+          emoji: (this.store.emoji || []).length,
+          sounds: (this.store.sounds || []).length,
+        },
         storage: {
           rooms: Object.keys(this.store.rooms || {}).length,
           tokens: Object.keys(this.store.tokens || {}).length,
@@ -1649,6 +1903,22 @@ export class ChatHub {
       const saved = await this.state.storage.get('sticker:' + id);
       if (!saved) return new Response('not found', { status: 404 });
       return this.imageResponse(saved);
+    }
+
+    // Свои эмодзи (1.13.0): картинки для текста, отдаются как стикеры.
+    if (request.method === 'GET' && url.pathname.startsWith('/emoji/')) {
+      const id = decodeURIComponent(url.pathname.split('/').pop() || '');
+      const saved = await this.state.storage.get('emoji:' + id);
+      if (!saved) return new Response('not found', { status: 404 });
+      return this.imageResponse(saved);
+    }
+
+    // Звуки звуковой панели (1.13.0): байты с долгим кэшем.
+    if (request.method === 'GET' && url.pathname.startsWith('/sound/')) {
+      const id = decodeURIComponent(url.pathname.split('/').pop() || '');
+      const saved = await this.state.storage.get('sound:' + id);
+      if (!saved) return new Response('not found', { status: 404 });
+      return this.soundResponse(saved);
     }
 
     // Разовая уборка: убирает сообщения и вложения удалённых аккаунтов.
@@ -1985,6 +2255,12 @@ export class ChatHub {
       const isDm = pair ? pair[0] === key || pair[1] === key : false;
       if (!isChannel && !isDm) return;
       this.sendTo(key, { t: 'history', room, messages: this.store.rooms[room] || [] });
+      // Новые события 1.13.0 — сразу после истории: закреплённые этой комнаты,
+      // наборы эмодзи и звуков, личная раскладка по категориям.
+      this.sendTo(key, this.pinsPayload(room));
+      this.sendTo(key, { t: 'emoji_pack', items: this.emojiPackView() });
+      this.sendTo(key, { t: 'sound_pack', items: this.soundPackView() });
+      this.sendTo(key, this.catsPayload(key));
       this.sendTo(key, { t: 'dm_list', items: this.dmList(key) });
       // Заодно присылаем актуальный состав: у участника он мог измениться,
       // пока приложение было закрыто.
@@ -2022,6 +2298,28 @@ export class ChatHub {
         const left = Math.ceil((user.mutedUntil - now()) / 60000);
         this.sendTo(key, { t: 'error', text: 'Вам запрещено писать ещё ' + left + ' мин.' });
         return;
+      }
+      // Медленный режим канала (1.13.0): владелец и сотрудники пишут свободно,
+      // остальные ждут, пока с их прошлого сообщения пройдёт нужное время.
+      const slowMeta = isChannel ? this.channelMeta(room) : null;
+      const slow = slowMeta ? Number(slowMeta.slow) || 0 : 0;
+      if (slow > 0 && !this.ownsChannel(key, room) && !this.canModerate(key)) {
+        const mine = this.store.rooms[room] || [];
+        let lastTs = 0;
+        for (let i = mine.length - 1; i >= 0; i -= 1) {
+          const one = mine[i];
+          if (one && normalizeName(one.author) === normalizeName(name)) {
+            lastTs = Number(one.ts) || 0;
+            break;
+          }
+        }
+        const passed = lastTs ? now() - lastTs : Infinity;
+        if (passed < slow * 1000) {
+          const wait = Math.max(1, Math.ceil((slow * 1000 - passed) / 1000));
+          this.sendTo(key, { t: 'slow_wait', room, left: wait });
+          this.sendTo(key, { t: 'error', text: 'Медленный режим: подождите ' + wait + ' с.' });
+          return;
+        }
       }
       if (!rate.ok) {
         this.sendTo(key, { t: 'error', text: 'Слишком часто. Подождите ' + rate.retry + ' с.' });
@@ -2085,6 +2383,268 @@ export class ChatHub {
       return;
     }
 
+    // ------------------------------------ закреплённые сообщения (1.13.0)
+    if (kind === 'msg_pin' || kind === 'msg_unpin') {
+      const room = String(value.room || '');
+      const id = Number(value.id);
+      if (!room || !id) return;
+      if (!this.canSeeRoom(key, room)) {
+        this.sendTo(key, { t: 'error', text: 'Нет доступа к этой комнате' });
+        return;
+      }
+      const list = this.store.rooms[room] || [];
+      const target = list.find((m) => m && m.id === id);
+      if (!target) {
+        this.sendTo(key, { t: 'error', text: 'Сообщение не найдено' });
+        return;
+      }
+      const pair = dmPartners(room);
+      // В канале закрепляет автор сообщения, владелец канала или сотрудник;
+      // в личке — участник переписки (он уже проверен выше).
+      const isAuthor = normalizeName(target.author) === normalizeName(name);
+      if (!pair && !isAuthor && !this.ownsChannel(key, room) && !this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Закреплять может автор, владелец канала или сотрудник' });
+        return;
+      }
+      if (!this.store.pins) this.store.pins = {};
+      const current = Array.isArray(this.store.pins[room]) ? this.store.pins[room] : [];
+      if (kind === 'msg_pin') {
+        if (!current.includes(id)) {
+          if (current.length >= PIN_LIMIT) {
+            this.sendTo(key, { t: 'error', text: 'В комнате уже ' + PIN_LIMIT + ' закреплённых' });
+            return;
+          }
+          this.store.pins[room] = [id, ...current];
+          this.audit(key, name, 'pin', pair ? 'личный чат' : this.channelTitle(room), 'сообщение #' + id);
+        }
+      } else if (current.includes(id)) {
+        const rest = current.filter((one) => one !== id);
+        if (rest.length) this.store.pins[room] = rest;
+        else delete this.store.pins[room];
+        this.audit(key, name, 'unpin', pair ? 'личный чат' : this.channelTitle(room), 'сообщение #' + id);
+      }
+      await this.save();
+      this.roomSend(room, this.pinsPayload(room));
+      return;
+    }
+
+    // ------------------------------------------------------ опросы (1.13.0)
+    if (kind === 'poll_create') {
+      const room = String(value.room || '');
+      const question = head(String(value.question || '').trim(), POLL_QUESTION_MAX);
+      const rawOptions = Array.isArray(value.options) ? value.options : [];
+      const options = rawOptions
+        .map((one) => head(String(one == null ? '' : one).trim(), POLL_OPTION_MAX))
+        .filter((one) => !!one);
+      if (!question) {
+        this.sendTo(key, { t: 'error', text: 'Вопрос опроса не может быть пустым' });
+        return;
+      }
+      if (options.length < POLL_OPTIONS_MIN || options.length > POLL_OPTIONS_MAX) {
+        this.sendTo(key, { t: 'error', text: 'В опросе нужно от ' + POLL_OPTIONS_MIN + ' до ' + POLL_OPTIONS_MAX + ' вариантов' });
+        return;
+      }
+      const isChannel = this.inChannel(key, room);
+      const pair = dmPartners(room);
+      const isDm = pair ? pair[0] === key || pair[1] === key : false;
+      if (!isChannel && !isDm) {
+        this.sendTo(key, { t: 'error', text: 'Нет доступа к этой комнате' });
+        return;
+      }
+      if (user.banned || (this.store.banned && this.store.banned[key]) || this.isMuted(user)) {
+        this.sendTo(key, { t: 'error', text: 'Пока нельзя: действует ограничение' });
+        return;
+      }
+      // Опрос — это сообщение, поэтому частота та же, что у обычных сообщений.
+      const rate = this.checkMessageRate(key);
+      if (!rate.ok) {
+        this.sendTo(key, { t: 'error', text: 'Слишком часто. Подождите ' + rate.retry + ' с.' });
+        return;
+      }
+      if (pair) {
+        const otherKey = pair[0] === key ? pair[1] : pair[0];
+        const other = this.store.users[otherKey];
+        if (other) {
+          const priv = mergeSettings(other.settings, null).dmPrivacy;
+          if (priv === 'friends' && !(other.friends || []).includes(key)) {
+            this.sendTo(key, { t: 'error', text: `${other.name} принимает личные сообщения только от друзей` });
+            return;
+          }
+        }
+      }
+      this.store.seq = (this.store.seq || 0) + 1;
+      const message = {
+        id: this.store.seq,
+        room,
+        author: name,
+        text: question,
+        ts: now(),
+        authorProfile: this.profileView(user),
+        poll: {
+          question,
+          options: options.map((text, i) => ({ id: String(i + 1), text })),
+          votes: {},
+          multiple: !!value.multiple,
+          closed: false,
+        },
+      };
+      this.pushMessage(room, message);
+      await this.save();
+      this.pushNotify(message, key);
+      const event = { t: 'msg', ...message };
+      if (pair) {
+        this.sendTo(pair[0], event);
+        this.sendTo(pair[1], event);
+        this.sendTo(pair[0], { t: 'dm_list', items: this.dmList(pair[0]) });
+        this.sendTo(pair[1], { t: 'dm_list', items: this.dmList(pair[1]) });
+      } else {
+        this.sendChannel(room, event);
+        this.matrixOut(room, message);
+      }
+      return;
+    }
+
+    // Голос в опросе: имена голосующих, а не ключи аккаунтов (так в контракте).
+    if (kind === 'poll_vote') {
+      const room = String(value.room || '');
+      const id = Number(value.id);
+      const option = String(value.option || '');
+      if (!id || !option || !this.canSeeRoom(key, room)) return;
+      const list = this.store.rooms[room] || [];
+      const target = list.find((m) => m && m.id === id);
+      if (!target || !target.poll || !Array.isArray(target.poll.options)) {
+        this.sendTo(key, { t: 'error', text: 'Опрос не найден' });
+        return;
+      }
+      const poll = target.poll;
+      if (poll.closed) {
+        this.sendTo(key, { t: 'error', text: 'Опрос закрыт' });
+        return;
+      }
+      if (!poll.options.some((one) => one && String(one.id) === option)) return;
+      if (!poll.votes || typeof poll.votes !== 'object') poll.votes = {};
+      const low = normalizeName(name);
+      const already = (Array.isArray(poll.votes[option]) ? poll.votes[option] : [])
+        .some((one) => normalizeName(one) === low);
+      if (poll.multiple) {
+        const rest = (Array.isArray(poll.votes[option]) ? poll.votes[option] : [])
+          .filter((one) => normalizeName(one) !== low);
+        if (already) {
+          if (rest.length) poll.votes[option] = rest;
+          else delete poll.votes[option];
+        } else {
+          poll.votes[option] = rest.concat([name]);
+        }
+      } else {
+        // Одиночный выбор: имя голосующего остаётся ровно в одном варианте,
+        // а повторный клик по выбранному варианту снимает голос.
+        for (const one of Object.keys(poll.votes)) {
+          const rest = (Array.isArray(poll.votes[one]) ? poll.votes[one] : [])
+            .filter((who) => normalizeName(who) !== low);
+          if (rest.length) poll.votes[one] = rest;
+          else delete poll.votes[one];
+        }
+        if (!already) poll.votes[option] = (poll.votes[option] || []).concat([name]);
+      }
+      await this.save();
+      this.roomSend(room, { t: 'msg_poll', room, id, poll });
+      return;
+    }
+
+    if (kind === 'poll_close') {
+      const room = String(value.room || '');
+      const id = Number(value.id);
+      if (!id || !this.canSeeRoom(key, room)) return;
+      const list = this.store.rooms[room] || [];
+      const target = list.find((m) => m && m.id === id);
+      if (!target || !target.poll) return;
+      const isAuthor = normalizeName(target.author) === normalizeName(name);
+      if (!isAuthor && !this.ownsChannel(key, room) && !this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Закрыть опрос может автор, владелец канала или сотрудник' });
+        return;
+      }
+      if (target.poll.closed) return;
+      target.poll.closed = true;
+      await this.save();
+      this.roomSend(room, { t: 'msg_poll', room, id, poll: target.poll });
+      return;
+    }
+
+    // --------------------------------------------- пересылка сообщений (1.13.0)
+    if (kind === 'msg_forward') {
+      const from = String(value.room || '');
+      const to = String(value.to || '');
+      const id = Number(value.id);
+      if (!id || !to) return;
+      if (!this.canSeeRoom(key, from) || !this.canSeeRoom(key, to)) {
+        this.sendTo(key, { t: 'error', text: 'Нет доступа к этой комнате' });
+        return;
+      }
+      const source = (this.store.rooms[from] || []).find((m) => m && m.id === id);
+      if (!source) {
+        this.sendTo(key, { t: 'error', text: 'Сообщение не найдено' });
+        return;
+      }
+      if (user.banned || (this.store.banned && this.store.banned[key])) {
+        this.sendTo(key, { t: 'error', text: 'Аккаунт заблокирован' });
+        return;
+      }
+      if (this.isMuted(user)) {
+        this.sendTo(key, { t: 'error', text: 'Пока нельзя: действует ограничение' });
+        return;
+      }
+      // Больше десяти пересылок в минуту не разрешаем.
+      const rate = this.rateAllow(key, 'forward', FORWARD_RATE, FORWARD_WINDOW);
+      if (!rate.ok) {
+        this.sendTo(key, { t: 'error', text: 'Слишком много пересылок. Подождите ' + rate.retry + ' с.' });
+        return;
+      }
+      const toPair = dmPartners(to);
+      if (toPair) {
+        const otherKey = toPair[0] === key ? toPair[1] : toPair[0];
+        const other = this.store.users[otherKey];
+        if (other) {
+          const priv = mergeSettings(other.settings, null).dmPrivacy;
+          if (priv === 'friends' && !(other.friends || []).includes(key)) {
+            this.sendTo(key, { t: 'error', text: `${other.name} принимает личные сообщения только от друзей` });
+            return;
+          }
+        }
+      }
+      this.store.seq = (this.store.seq || 0) + 1;
+      const message = {
+        id: this.store.seq,
+        room: to,
+        author: name,
+        text: head(String(source.text || ''), MAX_TEXT_CHARS),
+        ts: now(),
+        authorProfile: this.profileView(user),
+        // Снимок оригинала: автор, первые 200 символов и время.
+        fwd: {
+          author: String(source.author || ''),
+          text: head(String(source.text || ''), FORWARD_HEAD),
+          ts: Number(source.ts) || 0,
+        },
+      };
+      // Стикер копируем целиком, вложение — нет (клиент его не перешлёт).
+      if (source.sticker) message.sticker = { ...source.sticker };
+      this.pushMessage(to, message);
+      await this.save();
+      this.pushNotify(message, key);
+      const event = { t: 'msg', ...message };
+      if (toPair) {
+        this.sendTo(toPair[0], event);
+        this.sendTo(toPair[1], event);
+        this.sendTo(toPair[0], { t: 'dm_list', items: this.dmList(toPair[0]) });
+        this.sendTo(toPair[1], { t: 'dm_list', items: this.dmList(toPair[1]) });
+      } else {
+        this.sendChannel(to, event);
+        this.matrixOut(to, message);
+      }
+      this.sendTo(key, { t: 'forwarded', to });
+      return;
+    }
+
     // Реакции (1.4.0): одна на пользователя на эмодзи, повторный клик снимает.
     if (kind === 'msg_react') {
       const room = String(value.room || '');
@@ -2126,10 +2686,14 @@ export class ChatHub {
       return;
     }
 
-    // Поиск по истории: каналы и свои личные чаты (1.4.0).
+    // Поиск по истории: каналы и свои личные чаты (1.4.0). С 1.13.0 выдачу
+    // можно сузить по автору, типу сообщения и времени.
     if (kind === 'search_messages') {
       const q = head(String(value.q || '').trim(), 100);
       const wanted = String(value.room || '');
+      const from = head(String(value.from || '').trim().toLowerCase(), 40);
+      const has = String(value.has || '').trim().toLowerCase();
+      const before = Number(value.before) || 0;
       const hits = [];
       if ([...q].length >= 2) {
         const needle = q.toLowerCase();
@@ -2146,7 +2710,19 @@ export class ChatHub {
             if (!m) continue;
             const text = String(m.text || '');
             if (!text || !text.toLowerCase().includes(needle)) continue;
-            hits.push({ room, id: m.id, author: m.author, text: head(text, 200), ts: m.ts || 0 });
+            // Только сообщения старше указанного времени.
+            if (before && !((Number(m.ts) || 0) < before)) continue;
+            // Автор: имя или отображаемое имя, сравнение подстрокой.
+            if (from) {
+              const profile = m.authorProfile || null;
+              const shown = profile ? String(profile.displayName || '').toLowerCase() : '';
+              if (!String(m.author || '').toLowerCase().includes(from) && !shown.includes(from)) continue;
+            }
+            if (has && !this.messageHasKind(m, has)) continue;
+            const hit = { room, id: m.id, author: m.author, text: head(text, 200), ts: m.ts || 0 };
+            const kind = this.messageKind(m);
+            if (kind) hit.kind = kind;
+            hits.push(hit);
           }
         }
         hits.sort((a, b) => (b.ts || 0) - (a.ts || 0) || (b.id || 0) - (a.id || 0));
@@ -2277,6 +2853,15 @@ export class ChatHub {
       const wasMine = isMine;
       const authorName = String(list[idx].author || '');
       list.splice(idx, 1);
+      // Удалённое сообщение больше не висит в закреплённых (1.13.0).
+      let unpinned = false;
+      const roomPins = this.store.pins ? this.store.pins[room] : null;
+      if (Array.isArray(roomPins) && roomPins.includes(id)) {
+        const rest = roomPins.filter((one) => one !== id);
+        if (rest.length) this.store.pins[room] = rest;
+        else delete this.store.pins[room];
+        unpinned = true;
+      }
       await this.save();
       const event = { t: 'msg_delete', room, id };
       const pair = dmPartners(room);
@@ -2286,6 +2871,7 @@ export class ChatHub {
       } else {
         this.sendChannel(room, event);
       }
+      if (unpinned) this.roomSend(room, this.pinsPayload(room));
       // Владелец канала удалил чужое — автору сообщения говорим об этом прямо.
       if (!wasMine && authorName) {
         const authorKey = normalizeName(authorName);
@@ -2338,6 +2924,8 @@ export class ChatHub {
         this.sendTo(key, { t: 'error', text: res.error });
         return;
       }
+      this.audit(key, name, 'backup_restore', res.date, '');
+      await this.save();
       this.sendTo(key, { t: 'notice', text: 'Состояние восстановлено из копии за ' + res.date });
       this.sendTo(key, await this.backupList());
       // У остальных участников могла измениться лента — просим перечитать.
@@ -2371,6 +2959,7 @@ export class ChatHub {
           if (this.store.tokenAt) delete this.store.tokenAt[tk];
         }
       }
+      this.audit(key, name, 'password_reset', user2.name, '');
       await this.save();
       for (const ws of this.sockets(target)) {
         try { ws.close(1000, 'password reset'); } catch (_) { /* уже закрыт */ }
@@ -2398,6 +2987,7 @@ export class ChatHub {
       const max = Math.min(50, Math.max(1, Number(value.max) || INVITE_USES));
       const item = { code: this.newInviteCode(), by: name, created: now(), uses: 0, max, usedBy: [] };
       this.store.invites.push(item);
+      this.audit(key, name, 'invite_create', item.code, 'на ' + max + ' использований');
       await this.save();
       const origin = 'https://rust-messenger.sg530507.workers.dev';
       this.sendTo(key, {
@@ -2427,6 +3017,7 @@ export class ChatHub {
       const before = (this.store.invites || []).length;
       this.store.invites = (this.store.invites || []).filter((i) => i.code !== code);
       if (this.store.invites.length === before) return;
+      this.audit(key, name, 'invite_revoke', code, '');
       await this.save();
       this.sendTo(key, { t: 'invite_list', invites: this.store.invites.map((i) => this.inviteView(i)), inviteOnly: !!this.store.inviteOnly });
       this.sendTo(key, { t: 'notice', text: 'Код ' + code + ' отозван' });
@@ -2511,8 +3102,9 @@ export class ChatHub {
       } else {
         this.store.staff = this.store.staff.filter((k) => k !== target);
       }
-      await this.save();
       const other = this.store.users[target];
+      this.audit(key, name, kind === 'staff_add' ? 'staff_add' : 'staff_remove', other ? other.name : target, '');
+      await this.save();
       this.sendTo(target, {
         t: 'role_changed',
         role: this.roleOf(target),
@@ -2555,6 +3147,7 @@ export class ChatHub {
       if (!other) return;
       if (kind === 'user_unmute') {
         delete other.mutedUntil;
+        this.audit(key, name, 'unmute', other.name, '');
         await this.save();
         this.sendTo(target, { t: 'notice', text: 'Мьют снят' });
         this.sendTo(key, { t: 'notice', text: other.name + ': мьют снят' });
@@ -2562,6 +3155,7 @@ export class ChatHub {
       }
       const minutes = Math.min(1440, Math.max(1, Number(value.minutes) || 10));
       other.mutedUntil = now() + minutes * 60000;
+      this.audit(key, name, 'mute', other.name, minutes + ' мин');
       await this.save();
       this.sendTo(target, {
         t: 'notice',
@@ -2587,12 +3181,14 @@ export class ChatHub {
       if (kind === 'user_unban') {
         delete this.store.banned[target];
         delete other.banned;
+        this.audit(key, name, 'unban', other.name, '');
         await this.save();
         this.sendTo(key, { t: 'notice', text: other.name + ' разблокирован' });
         return;
       }
       this.store.banned[target] = now();
       other.banned = true;
+      this.audit(key, name, 'ban', other.name, '');
       // Гасим все сессии забаненного и закрываем его сокеты.
       for (const [tk, ownerKey] of Object.entries(this.store.tokens)) {
         if (ownerKey === target) {
@@ -2675,6 +3271,185 @@ export class ChatHub {
       return;
     }
 
+    // ------------------------------------------ свои эмодзи 1.13.0
+    // В отличие от стикеров, эмодзи для текста добавляет только модерация:
+    // набор общий, и мусор в нём видят все.
+    if (kind === 'emoji_add') {
+      if (!this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Свои эмодзи добавляет владелец или сотрудник' });
+        return;
+      }
+      const label = String(value.name || '').trim().toLowerCase();
+      if (!EMOJI_NAME_RE.test(label)) {
+        this.sendTo(key, { t: 'error', text: 'Имя эмодзи: 2–20 символов, латиница, цифры и _' });
+        return;
+      }
+      if (!Array.isArray(this.store.emoji)) this.store.emoji = [];
+      if (this.store.emoji.length >= EMOJI_LIMIT) {
+        this.sendTo(key, { t: 'error', text: 'В наборе уже ' + EMOJI_LIMIT + ' эмодзи' });
+        return;
+      }
+      if (this.store.emoji.some((one) => one && normalizeName(one.name) === label)) {
+        this.sendTo(key, { t: 'error', text: 'Эмодзи с таким именем уже есть' });
+        return;
+      }
+      const img = this.decodeImage(value, EMOJI_MAX_BYTES);
+      if (img.error) {
+        this.sendTo(key, { t: 'error', text: 'Эмодзи: ' + img.error });
+        return;
+      }
+      const id = randomHex(8);
+      const item = { id, name: label, by: user.name, v: now() };
+      await this.state.storage.put('emoji:' + id, { mime: img.mime, b64: img.b64, v: item.v });
+      this.store.emoji.push(item);
+      this.audit(key, name, 'emoji_add', label, '');
+      await this.save();
+      this.broadcast({ t: 'emoji_pack', items: this.emojiPackView() });
+      return;
+    }
+
+    if (kind === 'emoji_delete') {
+      if (!this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Удалять свои эмодзи может владелец или сотрудник' });
+        return;
+      }
+      const id = String(value.id || '');
+      const idx = (this.store.emoji || []).findIndex((one) => one && one.id === id);
+      if (idx < 0) return;
+      const item = this.store.emoji[idx];
+      this.store.emoji.splice(idx, 1);
+      await this.state.storage.delete('emoji:' + id);
+      this.audit(key, name, 'emoji_delete', item.name, '');
+      await this.save();
+      this.broadcast({ t: 'emoji_pack', items: this.emojiPackView() });
+      return;
+    }
+
+    // ------------------------------------- звуковая панель 1.13.0
+    if (kind === 'sound_add') {
+      if (!this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Звуки добавляет владелец или сотрудник' });
+        return;
+      }
+      const label = head(String(value.name || '').trim(), SOUND_NAME_MAX);
+      if (!label) {
+        this.sendTo(key, { t: 'error', text: 'Название звука: 1–24 символа' });
+        return;
+      }
+      const mime = String(value.mime || '').toLowerCase();
+      if (!SOUND_MIMES.includes(mime)) {
+        this.sendTo(key, { t: 'error', text: 'Формат звука не поддерживается' });
+        return;
+      }
+      const b64 = String(value.data || '').replace(/^data:[^,]*,/, '').replace(/\s+/g, '');
+      if (!b64 || !/^[A-Za-z0-9+/=]+$/.test(b64)) {
+        this.sendTo(key, { t: 'error', text: 'Не удалось прочитать звук' });
+        return;
+      }
+      const bytes = Math.floor((b64.length * 3) / 4);
+      if (bytes > SOUND_MAX_BYTES) {
+        this.sendTo(key, { t: 'error', text: 'Звук больше ' + Math.round(SOUND_MAX_BYTES / 1024) + ' КБ' });
+        return;
+      }
+      if (bytes < 12) {
+        this.sendTo(key, { t: 'error', text: 'Это не похоже на звуковой файл' });
+        return;
+      }
+      // Первых 12 байт достаточно, чтобы проверить сигнатуру контейнера.
+      const bytesOfHead = new Uint8Array(12);
+      try {
+        const binary = atob(b64.slice(0, 16));
+        for (let i = 0; i < binary.length && i < 12; i += 1) bytesOfHead[i] = binary.charCodeAt(i);
+      } catch (_) {
+        this.sendTo(key, { t: 'error', text: 'Не удалось прочитать звук' });
+        return;
+      }
+      if (!audioSignatureOk(bytesOfHead, mime)) {
+        this.sendTo(key, { t: 'error', text: 'Это не похоже на звуковой файл' });
+        return;
+      }
+      if (!Array.isArray(this.store.sounds)) this.store.sounds = [];
+      // Дубль имени заменяет прежний звук: так проще менять звук, не удаляя его.
+      const dup = this.store.sounds.find((one) => one && one.name.toLowerCase() === label.toLowerCase());
+      if (dup) {
+        await this.state.storage.delete('sound:' + dup.id);
+        this.store.sounds = this.store.sounds.filter((one) => one !== dup);
+      }
+      if (this.store.sounds.length >= SOUND_LIMIT) {
+        this.sendTo(key, { t: 'error', text: 'В наборе уже ' + SOUND_LIMIT + ' звуков' });
+        return;
+      }
+      const id = randomHex(8);
+      const item = { id, name: label, by: user.name, v: now(), mime };
+      await this.state.storage.put('sound:' + id, { mime, b64, v: item.v });
+      this.store.sounds.push(item);
+      this.audit(key, name, 'sound_add', label, dup ? 'заменён' : '');
+      await this.save();
+      this.broadcast({ t: 'sound_pack', items: this.soundPackView() });
+      return;
+    }
+
+    if (kind === 'sound_delete') {
+      if (!this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Удалять звуки может владелец или сотрудник' });
+        return;
+      }
+      const id = String(value.id || '');
+      const idx = (this.store.sounds || []).findIndex((one) => one && one.id === id);
+      if (idx < 0) return;
+      const item = this.store.sounds[idx];
+      this.store.sounds.splice(idx, 1);
+      await this.state.storage.delete('sound:' + id);
+      this.audit(key, name, 'sound_delete', item.name, '');
+      await this.save();
+      this.broadcast({ t: 'sound_pack', items: this.soundPackView() });
+      return;
+    }
+
+    // Играть звук может только тот, кто сам сидит в голосовом канале этой
+    // комнаты: иначе панелью можно было бы «стрелять» в чужой звонок.
+    if (kind === 'soundboard_play') {
+      const room = String(value.room || '');
+      const members = this.voice.get(room);
+      const inVoice = !!members && [...members.keys()]
+        .some((one) => normalizeName(one) === normalizeName(name));
+      if (!inVoice) {
+        this.sendTo(key, { t: 'error', text: 'Звуки играет только тот, кто в голосовом канале' });
+        return;
+      }
+      const wantedKey = String(value.key || '');
+      const wantedId = String(value.id || '');
+      if (!SOUND_KEYS.includes(wantedKey) && !wantedId) {
+        this.sendTo(key, { t: 'error', text: 'Неизвестный звук' });
+        return;
+      }
+      const custom = wantedId ? (this.store.sounds || []).find((one) => one && one.id === wantedId) : null;
+      if (wantedId && !custom) {
+        this.sendTo(key, { t: 'error', text: 'Такого звука нет' });
+        return;
+      }
+      const rate = this.rateAllow(key, 'soundboard', 1, SOUND_COOLDOWN);
+      if (!rate.ok) {
+        this.sendTo(key, { t: 'error', text: 'Звуки слишком часто — подождите немного' });
+        return;
+      }
+      const event = custom
+        ? { t: 'sound_play', room, by: name, key: '', id: custom.id, name: custom.name, url: this.soundUrl(custom) }
+        : { t: 'sound_play', room, by: name, key: wantedKey, id: '', name: wantedKey, url: '' };
+      this.roomSend(room, event);
+      return;
+    }
+
+    // -------------------------------------------------- журнал действий
+    if (kind === 'audit_list') {
+      if (!this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Журнал доступен владельцу и сотрудникам' });
+        return;
+      }
+      this.sendTo(key, this.auditPayload());
+      return;
+    }
+
     if (kind === 'profile_update') {
       const src = (value && value.profile) || value || {};
       const p = user.profile || (user.profile = defaultProfile(user.name, user.color));
@@ -2684,6 +3459,14 @@ export class ChatHub {
       }
       if (typeof src.bio === 'string') {
         p.bio = [...String(src.bio).trim()].slice(0, 190).join('');
+      }
+      // Статус текстом (1.13.0): одна строка до 60 символов и один эмодзи.
+      if (typeof src.statusText === 'string') {
+        p.statusText = head(String(src.statusText).replace(/[\r\n]+/g, ' ').trim(), STATUS_TEXT_MAX);
+      }
+      if (typeof src.statusEmoji === 'string') {
+        const chars = [...String(src.statusEmoji).trim()];
+        p.statusEmoji = chars.length <= STATUS_EMOJI_MAX ? chars.join('') : '';
       }
       if (typeof src.avatar === 'string') {
         const av = [...String(src.avatar).trim()].slice(0, 4).join('');
@@ -2829,9 +3612,19 @@ export class ChatHub {
       const mine = (this.store.stickers || []).filter((s) => normalizeName(s.by) === key);
       for (const s of mine) await this.state.storage.delete('sticker:' + s.id);
       this.store.stickers = (this.store.stickers || []).filter((s) => normalizeName(s.by) !== key);
+      // Свои эмодзи и звуки удалённого аккаунта убираем вместе с байтами.
+      for (const one of (this.store.emoji || []).filter((s) => normalizeName(s.by) === key)) {
+        await this.state.storage.delete('emoji:' + one.id);
+      }
+      this.store.emoji = (this.store.emoji || []).filter((s) => normalizeName(s.by) !== key);
+      for (const one of (this.store.sounds || []).filter((s) => normalizeName(s.by) === key)) {
+        await this.state.storage.delete('sound:' + one.id);
+      }
+      this.store.sounds = (this.store.sounds || []).filter((s) => normalizeName(s.by) !== key);
       // Сообщения и вложения удалённого аккаунта тоже уходят: иначе в ленте
       // остаются «призраки» с инициалами и висят чужие картинки.
       await this.purgeOrphans();
+      this.audit(key, name, 'account_delete', name, '');
       await this.save();
       this.sendTo(key, { t: 'account_deleted' });
       this.broadcast(this.presencePayload());
@@ -2868,6 +3661,9 @@ export class ChatHub {
       delete this.store.rooms[room];
       delete this.store.channelMeta[room];
       this.dropChannelCode(room);
+      // Закреплённые и категории удалённого канала тоже уходят (1.13.0).
+      this.dropRoomExtras(room);
+      this.audit(key, name, 'channel_delete', title, '');
       await this.save();
       this.broadcastChannels();
       for (const who of was) {
@@ -2913,6 +3709,7 @@ export class ChatHub {
       // У каждого канала сразу есть ссылка-приглашение: владельцу не нужно
       // делать лишний шаг, чтобы позвать человека.
       this.ensureChannelCode(room);
+      this.audit(key, name, 'channel_create', title, '');
       await this.save();
       this.sendChannels(key);
       this.sendTo(key, { t: 'history', room, messages: [] });
@@ -2978,6 +3775,7 @@ export class ChatHub {
         this.voiceRemove(other.name);
         this.broadcastVoice(room);
       }
+      this.audit(key, name, 'kick', other ? other.name : target, this.channelTitle(room));
       await this.save();
       const title = this.channelTitle(room);
       this.sendChannels(key);
@@ -3002,6 +3800,7 @@ export class ChatHub {
         this.voiceRemove(name);
         this.broadcastVoice(room);
       }
+      this.audit(key, name, 'channel_leave', this.channelTitle(room), '');
       await this.save();
       this.sendChannels(key);
       // Остальным участникам — свежий состав: счётчик в шапке должен совпасть.
@@ -3026,9 +3825,119 @@ export class ChatHub {
       }
       const meta = this.channelMeta(room);
       meta.title = title;
+      this.audit(key, name, 'channel_rename', title, '');
       await this.save();
       this.broadcastChannels();
       this.sendChannel(room, { t: 'notice', text: 'Канал переименован: #' + title });
+      return;
+    }
+
+    // Медленный режим (1.13.0): 0 — выключен, иначе секунды между сообщениями.
+    if (kind === 'channel_slow') {
+      const room = String(value.room || '').trim();
+      if (!room || !this.store.channels.includes(room)) return;
+      if (!this.ownsChannel(key, room) && !this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Медленный режим включает владелец канала или сотрудник' });
+        return;
+      }
+      const meta = this.channelMeta(room);
+      if (!meta) return;
+      const raw = Number(value.seconds);
+      const seconds = Number.isFinite(raw) ? Math.min(SLOW_MAX, Math.max(0, Math.round(raw))) : 0;
+      meta.slow = seconds;
+      this.audit(key, name, 'channel_slow', this.channelTitle(room), seconds ? seconds + ' с' : 'выключен');
+      await this.save();
+      this.broadcastChannels();
+      return;
+    }
+
+    // Описание канала (1.13.0): одна строка до 200 символов.
+    if (kind === 'channel_topic') {
+      const room = String(value.room || '').trim();
+      if (!room || !this.store.channels.includes(room)) return;
+      if (!this.ownsChannel(key, room) && !this.canModerate(key)) {
+        this.sendTo(key, { t: 'error', text: 'Описание канала меняет владелец канала или сотрудник' });
+        return;
+      }
+      const meta = this.channelMeta(room);
+      if (!meta) return;
+      const topic = head(String(value.topic || '').replace(/\s+/g, ' ').trim(), CHANNEL_TOPIC_MAX);
+      meta.topic = topic;
+      this.audit(key, name, 'channel_topic', this.channelTitle(room), topic);
+      await this.save();
+      this.broadcastChannels();
+      return;
+    }
+
+    // ------------------------------------ личные категории каналов (1.13.0)
+    if (kind === 'cat_add') {
+      if (!this.store.cats) this.store.cats = {};
+      const items = this.store.cats[key] || (this.store.cats[key] = []);
+      const label = head(String(value.name || '').trim(), CAT_NAME_MAX);
+      if (!label) {
+        this.sendTo(key, { t: 'error', text: 'Название категории не может быть пустым' });
+        return;
+      }
+      if (items.length >= CAT_LIMIT) {
+        this.sendTo(key, { t: 'error', text: 'Категорий уже ' + CAT_LIMIT + ' — больше нельзя' });
+        return;
+      }
+      const id = crypto.randomUUID().replace(/-/g, '').slice(0, CAT_ID_LEN);
+      items.push({ id, name: label });
+      await this.save();
+      this.sendTo(key, this.catsPayload(key));
+      return;
+    }
+
+    if (kind === 'cat_rename') {
+      const id = String(value.id || '');
+      const items = (this.store.cats || {})[key] || [];
+      const cat = items.find((one) => one && one.id === id);
+      if (!cat) return;
+      const label = head(String(value.name || '').trim(), CAT_NAME_MAX);
+      if (!label) {
+        this.sendTo(key, { t: 'error', text: 'Название категории не может быть пустым' });
+        return;
+      }
+      cat.name = label;
+      await this.save();
+      this.sendTo(key, this.catsPayload(key));
+      return;
+    }
+
+    if (kind === 'cat_remove') {
+      const id = String(value.id || '');
+      if (!this.store.cats || !Array.isArray(this.store.cats[key])) return;
+      const before = this.store.cats[key].length;
+      this.store.cats[key] = this.store.cats[key].filter((one) => !one || one.id !== id);
+      if (this.store.cats[key].length === before) return;
+      // Вместе с категорией уходят и привязки каналов к ней.
+      const map = (this.store.catOf || {})[key] || {};
+      for (const [room, catId] of Object.entries(map)) {
+        if (catId === id) delete map[room];
+      }
+      await this.save();
+      this.sendTo(key, this.catsPayload(key));
+      this.sendChannels(key);
+      return;
+    }
+
+    if (kind === 'channel_cat') {
+      const room = String(value.room || '');
+      const cat = String(value.cat || '');
+      if (!this.inChannel(key, room)) return;
+      if (!this.store.catOf) this.store.catOf = {};
+      const map = this.store.catOf[key] || (this.store.catOf[key] = {});
+      if (!cat) {
+        delete map[room];
+      } else if (((this.store.cats || {})[key] || []).some((one) => one && one.id === cat)) {
+        map[room] = cat;
+      } else {
+        return;
+      }
+      await this.save();
+      this.sendTo(key, this.catsPayload(key));
+      this.sendChannels(key);
       return;
     }
 
@@ -3092,6 +4001,7 @@ export class ChatHub {
       meta.members = members.concat([key]);
       const item = (this.store.channelCodes || {})[room];
       if (item) item.uses = (Number(item.uses) || 0) + 1;
+      this.audit(key, name, 'channel_join', title, 'по ссылке');
       await this.save();
       this.sendTo(key, { t: 'notice', text: 'Вы в канале #' + title });
       this.sendChannels(key);
@@ -3198,7 +4108,7 @@ export class ChatHub {
         this.sendTo(key, { t: 'voice_state', room, limit: VOICE_LIMIT, users: [...members.values()] });
         return;
       }
-      members.set(name, { name, muted: false, screen: false });
+      members.set(name, { name, muted: false, screen: false, deaf: false });
       this.broadcastVoice(room);
       return;
     }
@@ -3296,9 +4206,26 @@ export class ChatHub {
         for (const [memberName, member] of members) {
           if (memberName === name) {
             member.muted = muted;
+            // Включение микрофона снимает и оглушение (1.13.0).
+            if (!muted) member.deaf = false;
             rooms.push(room);
           }
         }
+      }
+      for (const room of rooms) this.broadcastVoice(room);
+      return;
+    }
+
+    // Оглушение (1.13.0): выключает и звук, и микрофон — как в обычных звонках.
+    if (kind === 'voice_deafen') {
+      const deaf = !!value.deaf;
+      const rooms = [];
+      for (const [room, members] of this.voice) {
+        const member = members.get(name);
+        if (!member) continue;
+        member.deaf = deaf;
+        if (deaf) member.muted = true;
+        rooms.push(room);
       }
       for (const room of rooms) this.broadcastVoice(room);
       return;

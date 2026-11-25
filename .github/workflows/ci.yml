@@ -90,6 +90,7 @@ jobs:
               exit $code
             fi
           }
+          run_suite parity test-parity.mjs
           run_suite protocol test-server.mjs
           run_suite invites test-scenario-a.mjs
           run_suite moderation test-moderation.mjs
