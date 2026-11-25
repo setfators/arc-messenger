@@ -105,6 +105,29 @@ jobs:
           run_suite links test-channel-link.mjs
           run_suite e2e test-e2e.mjs
 
+      # Настоящий браузер (Chrome есть в ubuntu-latest): проверяем то, что не
+      # умеет jsdom — CSS-анимации, computed styles и адаптивные медиазапросы.
+      - name: Вёрстка в настоящем браузере
+        run: |
+          set -e
+          persist="$(mktemp -d)"
+          node node_modules/wrangler/bin/wrangler.js dev --port 8790 --persist-to "$persist" --local > wrangler-browser.log 2>&1 &
+          pid=$!
+          for _ in $(seq 1 60); do
+            if curl -sf "http://127.0.0.1:8790/health" > /dev/null; then break; fi
+            sleep 2
+          done
+          node test-browser.mjs http://127.0.0.1:8790
+          code=$?
+          kill $pid 2>/dev/null || true
+          wait $pid 2>/dev/null || true
+          rm -rf "$persist"
+          if [ $code -ne 0 ]; then
+            echo "--- лог wrangler (browser) ---"
+            tail -40 wrangler-browser.log || true
+          fi
+          exit $code
+
       - name: Логи wrangler при падении
         if: failure()
         run: tail -80 wrangler-*.log 2>/dev/null || true
