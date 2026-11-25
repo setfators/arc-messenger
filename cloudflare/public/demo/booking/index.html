@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Запись в барбершоп — Telegram Mini App (демо)</title>
+<meta name="description" content="Демо Telegram Mini App для записи в барбершоп: услуга, дата, время и подтверждение.">
+<meta name="theme-color" content="#0d0f14">
+<style>
+  :root {
+    --bg: #0d0f14;
+    --panel: #141821;
+    --panel-2: #1b2130;
+    --line: rgba(255,255,255,.09);
+    --line-2: rgba(255,255,255,.18);
+    --text: #eef2f9;
+    --muted: #93a0b6;
+    --accent: #d8b26a;
+    --accent-2: #b98c45;
+    --ok: #43d38d;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: #0a0c10; color: var(--text);
+    font: 15px/1.45 "Segoe UI Variable Text", "Segoe UI", Roboto, Arial, sans-serif;
+    display: flex; justify-content: center; min-height: 100vh;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .app {
+    width: min(460px, 100%); min-height: 100vh; background: var(--bg);
+    border-inline: 1px solid var(--line); display: flex; flex-direction: column;
+  }
+  .head { padding: 18px 18px 12px; display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+    background: linear-gradient(140deg, var(--accent), var(--accent-2)); color: #17120a;
+    font-size: 20px; font-weight: 800;
+  }
+  .head b { display: block; font-size: 15.5px; }
+  .head small { color: var(--muted); font-size: 11.5px; }
+  .head .demo {
+    margin-left: auto; font-size: 10px; color: var(--muted); border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 9px;
+  }
+  .progress { display: flex; gap: 5px; padding: 0 18px 14px; }
+  .progress i { height: 3px; flex: 1; border-radius: 99px; background: var(--line); transition: background .25s; }
+  .progress i.on { background: var(--accent); }
+
+  .body { padding: 4px 18px 20px; flex: 1; }
+  .step { display: none; animation: in .24s ease; }
+  .step.on { display: block; }
+  @keyframes in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+
+  .service {
+    width: 100%; display: flex; align-items: center; gap: 12px; text-align: left;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 13px 14px; margin-bottom: 8px; transition: border-color .18s, transform .18s;
+  }
+  .service:hover { border-color: var(--line-2); }
+  .service.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .service .ico { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--panel-2); font-size: 19px; flex: 0 0 38px; }
+  .service .nm { flex: 1; }
+  .service .nm b { display: block; font-size: 14px; }
+  .service .nm small { color: var(--muted); font-size: 11.5px; }
+  .service .pr { font-weight: 700; font-size: 14px; white-space: nowrap; }
+  .service .pr small { display: block; color: var(--muted); font-weight: 400; font-size: 10.5px; text-align: right; }
+
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 16px 0 8px; }
+  .days { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 2px; }
+  .day {
+    flex: 0 0 58px; border: 1px solid var(--line); background: var(--panel); border-radius: 12px;
+    padding: 8px 0; text-align: center; color: var(--muted);
+  }
+  .day b { display: block; color: var(--text); font-size: 16px; }
+  .day small { font-size: 10px; }
+  .day.sel { border-color: var(--accent); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .day.sel b { color: var(--accent); }
+  .day:disabled { opacity: .35; }
+  .times { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+  .time {
+    padding: 10px 0; border-radius: 10px; border: 1px solid var(--line); background: var(--panel);
+    font-size: 13px; color: var(--text);
+  }
+  .time.sel { border-color: var(--accent); color: #17120a; background: var(--accent); font-weight: 700; }
+  .time:disabled { opacity: .3; text-decoration: line-through; }
+
+  .fields { display: grid; gap: 9px; margin-top: 14px; }
+  .fields label { font-size: 11.5px; color: var(--muted); display: grid; gap: 5px; }
+  .fields input {
+    width: 100%; padding: 11px 12px; border-radius: 11px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); font: inherit; font-size: 14px; outline: none;
+  }
+  .fields input:focus { border-color: var(--accent); }
+  .check { display: flex; gap: 9px; align-items: flex-start; color: var(--muted); font-size: 11.5px; margin-top: 10px; }
+  .check input { accent-color: var(--accent); margin-top: 2px; }
+
+  .summary { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 8px; margin-bottom: 14px; }
+  .summary div { display: flex; justify-content: space-between; gap: 14px; font-size: 13.5px; }
+  .summary span { color: var(--muted); }
+  .summary b { text-align: right; }
+  .summary .total { border-top: 1px dashed var(--line); padding-top: 8px; font-size: 15px; }
+  .summary .total b { color: var(--accent); }
+
+  .foot { padding: 12px 18px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg); display: flex; gap: 8px; }
+  .btn {
+    flex: 1; padding: 13px; border-radius: 12px; border: 1px solid var(--line-2);
+    background: var(--panel); color: var(--text); font-weight: 650; font-size: 14.5px;
+  }
+  .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border: none; color: #17120a; box-shadow: 0 8px 20px rgba(216,178,106,.22); }
+  .btn:disabled { opacity: .45; }
+  .btn.ghost { flex: 0 0 96px; }
+
+  .success { text-align: center; padding: 18px 4px 6px; }
+  .success .mark {
+    width: 68px; height: 68px; border-radius: 50%; display: grid; place-items: center; margin: 0 auto 14px;
+    background: rgba(67,211,141,.14); border: 1px solid rgba(67,211,141,.4); color: var(--ok); font-size: 30px;
+  }
+  .success h2 { margin: 0 0 6px; font-size: 21px; }
+  .success p { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+  .success .summary { text-align: left; }
+
+  @media (max-width: 380px) {
+    .times { grid-template-columns: repeat(3, 1fr); }
+    .head { padding-top: 14px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="head">
+    <div class="logo">✂</div>
+    <div><b>Барбершоп «Тихий срез»</b><small>Иркутск · ул. Примерная, 4</small></div>
+    <span class="demo">демо</span>
+  </header>
+
+  <div class="progress" id="progress"><i class="on"></i><i></i><i></i></div>
+
+  <main class="body">
+    <!-- Шаг 1: услуга -->
+    <section class="step on" data-step="1">
+      <h1>Выберите услугу</h1>
+      <p class="sub">Мастер подберёт форму под ваш тип волос. Длительность уже включена в цену.</p>
+      <div id="services"></div>
+    </section>
+
+    <!-- Шаг 2: дата и время -->
+    <section class="step" data-step="2">
+      <h1>Дата и время</h1>
+      <p class="sub">Свободные слоты обновляются каждые 15 минут. Если нужного нет — напишите нам.</p>
+      <div class="label">Дата</div>
+      <div class="days" id="days"></div>
+      <div class="label">Время</div>
+      <div class="times" id="times"></div>
+    </section>
+
+    <!-- Шаг 3: контакты -->
+    <section class="step" data-step="3">
+      <h1>Ваши контакты</h1>
+      <p class="sub">Подтверждение придёт в Telegram. Если планы изменятся — напишите за 2 часа, перенесём.</p>
+      <div class="fields">
+        <label>Имя<input id="name" placeholder="Как вас зовут" autocomplete="name" maxlength="50"></label>
+        <label>Телефон<input id="phone" placeholder="+7 (___) ___-__-__" inputmode="tel" autocomplete="tel" maxlength="24"></label>
+        <label>Комментарий<input id="comment" placeholder="Необязательно: пожелания" maxlength="120"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="agree"> Согласен на обработку данных. Это демонстрация, данные остаются на устройстве.</label>
+    </section>
+
+    <!-- Успех -->
+    <section class="step" data-step="4">
+      <div class="success">
+        <div class="mark">✓</div>
+        <h2>Вы записаны</h2>
+        <p>Мы ждём вас. Напомним за день до визита в Telegram.</p>
+        <div class="summary" id="finalSummary"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot" id="foot">
+    <button class="btn ghost" type="button" id="backBtn">Назад</button>
+    <button class="btn primary" type="button" id="nextBtn">Выбрать время</button>
+  </footer>
+</div>
+
+<script>
+  // Telegram WebApp: внутри Telegram Mini App разворачиваемся на весь экран,
+  // включаем кнопку MainButton и тактильный отклик. В обычном браузере — демо.
+  const TG = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  if (TG) {
+    try {
+      TG.ready();
+      TG.expand();
+      if (TG.setHeaderColor) TG.setHeaderColor('#0d0f14');
+      if (TG.setBackgroundColor) TG.setBackgroundColor('#0d0f14');
+    } catch (_) {}
+  }
+  const haptic = (type) => {
+    try { if (TG && TG.HapticFeedback) TG.HapticFeedback.impactOccurred(type || 'light'); } catch (_) {}
+  };
+
+  const SERVICES = [
+    { id: 'hair', name: 'Стрижка', desc: 'форма, мытьё, укладка', price: 1800, mins: 60, ico: '✂' },
+    { id: 'beard', name: 'Борода', desc: 'контур, триммер, масло', price: 1200, mins: 40, ico: '🧔' },
+    { id: 'combo', name: 'Стрижка + борода', desc: 'комплекс, выгоднее на 300 ₽', price: 2700, mins: 90, ico: '💈' },
+    { id: 'kids', name: 'Детская стрижка', desc: 'до 12 лет', price: 1100, mins: 40, ico: '🧒' },
+  ];
+  const SLOTS = ['10:00', '11:30', '13:00', '14:30', '16:00', '17:30', '19:00', '20:30'];
+  const BUSY = { 1: ['13:00', '19:00'], 2: ['10:00', '16:00'], 4: ['11:30', '17:30'] };
+
+  const state = {
+    step: 1,
+    service: null,
+    day: 0,
+    time: '',
+  };
+  const $ = (id) => document.getElementById(id);
+  const money = (n) => new Intl.NumberFormat('ru-RU').format(n) + ' ₽';
+
+  function daysList() {
+    const out = [];
+    for (let i = 0; i < 10; i += 1) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      out.push({ index: i, date: d });
+    }
+    return out;
+  }
+  const DAYS = daysList();
+  const dayName = (d) => ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'][d.getDay()];
+  const dateLabel = (d) => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+
+  function renderServices() {
+    const box = $('services');
+    box.innerHTML = '';
+    for (const s of SERVICES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'service' + (state.service && state.service.id === s.id ? ' sel' : '');
+      btn.innerHTML =
+        '<span class="ico">' + s.ico + '</span>' +
+        '<span class="nm"><b>' + s.name + '</b><small>' + s.desc + '</small></span>' +
+        '<span class="pr">' + money(s.price) + '<small>' + s.mins + ' мин</small></span>';
+      btn.addEventListener('click', () => {
+        state.service = s;
+        haptic('medium');
+        renderServices();
+        setNext(true, 'Выбрать время');
+      });
+      box.appendChild(btn);
+    }
+  }
+
+  function renderDays() {
+    const box = $('days');
+    box.innerHTML = '';
+    for (const d of DAYS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'day' + (state.day === d.index ? ' sel' : '');
+      const b = document.createElement('b');
+      b.textContent = String(d.date.getDate());
+      const small = document.createElement('small');
+      small.textContent = dayName(d.date);
+      btn.append(b, small);
+      btn.addEventListener('click', () => {
+        state.day = d.index;
+        state.time = '';
+        haptic('light');
+        renderDays();
+        renderTimes();
+        setNext(false);
+      });
+      box.appendChild(btn);
+    }
+  }
+
+  function renderTimes() {
+    const box = $('times');
+    box.innerHTML = '';
+    const busy = BUSY[state.day] || [];
+    for (const slot of SLOTS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'time' + (state.time === slot ? ' sel' : '');
+      btn.textContent = slot;
+      btn.disabled = busy.includes(slot);
+      btn.addEventListener('click', () => {
+        state.time = slot;
+        haptic('light');
+        renderTimes();
+        setNext(true, 'Продолжить');
+      });
+      box.appendChild(btn);
+    }
+  }
+
+  function summary() {
+    const s = state.service;
+    const d = DAYS[state.day] ? DAYS[state.day].date : new Date();
+    return { service: s ? s.name : '—', when: dateLabel(d) + ', ' + (state.time || '—'), price: s ? s.price : 0, mins: s ? s.mins : 0 };
+  }
+
+  function renderFinal() {
+    const s = summary();
+    const box = $('finalSummary');
+    box.innerHTML =
+      '<div><span>Услуга</span><b>' + s.service + '</b></div>' +
+      '<div><span>Когда</span><b>' + s.when + '</b></div>' +
+      '<div><span>Длительность</span><b>' + s.mins + ' мин</b></div>' +
+      '<div class="total"><span>Итого</span><b>' + money(s.price) + '</b></div>';
+  }
+
+  function setStep(step) {
+    state.step = step;
+    for (const node of document.querySelectorAll('.step')) node.classList.toggle('on', Number(node.dataset.step) === step);
+    const bars = document.querySelectorAll('#progress i');
+    bars.forEach((bar, index) => bar.classList.toggle('on', index < Math.min(step, 3)));
+    $('backBtn').style.display = step === 1 || step === 4 ? 'none' : '';
+    if (step === 1) setNext(!!state.service, 'Выбрать время');
+    if (step === 2) setNext(!!state.time, 'Продолжить');
+    if (step === 3) setNext(true, 'Подтвердить запись');
+    if (step === 4) {
+      $('foot').innerHTML = '<button class="btn primary" type="button" onclick="location.reload()">Записаться ещё раз</button>';
+      renderFinal();
+      haptic('heavy');
+    }
+  }
+
+  function setNext(enabled, label) {
+    const btn = $('nextBtn');
+    if (!btn) return;
+    btn.disabled = !enabled;
+    if (label) btn.textContent = label;
+  }
+
+  function validateContacts() {
+    const name = $('name').value.trim();
+    const phone = $('phone').value.replace(/[^\d+]/g, '');
+    if (name.length < 2) { haptic('heavy'); alert('Напишите имя'); return false; }
+    if (phone.replace(/\D/g, '').length < 10) { haptic('heavy'); alert('Проверьте номер телефона'); return false; }
+    if (!$('agree').checked) { haptic('heavy'); alert('Нужно согласие на обработку данных'); return false; }
+    return true;
+  }
+
+  $('backBtn').addEventListener('click', () => { if (state.step > 1 && state.step < 4) setStep(state.step - 1); });
+  $('nextBtn').addEventListener('click', () => {
+    if (state.step === 1 && state.service) setStep(2);
+    else if (state.step === 2 && state.time) setStep(3);
+    else if (state.step === 3 && validateContacts()) {
+      const s = summary();
+      try {
+        localStorage.setItem('barber-booking', JSON.stringify({
+          service: s.service, when: s.when, price: s.price,
+          name: $('name').value.trim(), phone: $('phone').value.trim(),
+          comment: $('comment').value.trim(), at: Date.now(),
+        }));
+      } catch (_) {}
+      setStep(4);
+    }
+  });
+
+  // Маска телефона: +7 (999) 123-45-67.
+  $('phone').addEventListener('input', (event) => {
+    let digits = event.target.value.replace(/\D/g, '');
+    if (digits.startsWith('8')) digits = '7' + digits.slice(1);
+    if (!digits.startsWith('7')) digits = '7' + digits;
+    digits = digits.slice(0, 11);
+    let out = '+7';
+    if (digits.length > 1) out += ' (' + digits.slice(1, 4);
+    if (digits.length >= 4) out += ') ' + digits.slice(4, 7);
+    if (digits.length >= 7) out += '-' + digits.slice(7, 9);
+    if (digits.length >= 9) out += '-' + digits.slice(9, 11);
+    event.target.value = out;
+  });
+
+  renderServices();
+  renderDays();
+  renderTimes();
+  setStep(1);
+
+  if (TG && TG.MainButton) {
+    try {
+      TG.MainButton.setText('Выбрать время');
+      TG.MainButton.onClick(() => $('nextBtn').click());
+    } catch (_) {}
+  }
+</script>
+</body>
+</html>
