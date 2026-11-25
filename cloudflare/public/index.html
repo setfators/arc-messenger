@@ -4613,7 +4613,7 @@ function scrollDown() {
 function nearBottom(box) {
   const el = box || $('messages');
   if (!el) return true;
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
 }
 
 function updateJumpDown() {
